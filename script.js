@@ -542,17 +542,34 @@ function saleProfile(player, club) {
   const adjustment = ((hashId(player.id + gameState.season) % 11) - 5) / 100;
   return { stance, demand: Math.round(Math.max(player.marketValue*.65, player.marketValue*(base + attack + importance + contract + adjustment))/50000)*50000 };
 }
+function formatOfferAmount(amount) {
+  return '€' + (Math.max(0, Number(amount) || 0) / 1000000).toFixed(1) + 'M';
+}
+function setOfferAmount(amount) {
+  const value = Math.max(50000, Math.min(gameState.clubFunds, Math.round((Number(amount) || 0) / 50000) * 50000));
+  $('#offer-amount').value = value;
+  $('#offer-amount-display').textContent = formatOfferAmount(value);
+}
+function refreshOfferAmountDisplay() {
+  $('#offer-amount-display').textContent = formatOfferAmount($('#offer-amount').value);
+}
 function openOfferDialog(id) {
   const entry = transferPlayer(id); if (!entry || !transferWindow().open) return notify('移籍期間外');
   if (gameState.transferRejected[negotiationKey(id)]) return notify('この移籍期間の交渉は決裂しています。');
   const form = formLabel(id), current = gameState.transferNegotiations[id];
   $('#contract-options').hidden = true; $('#offer-options').hidden = false; $('#counter-accept').hidden = !current?.counterFee;
   $('#offer-player').textContent = entry.player.name + ' · 市場価値 ' + money(entry.player.marketValue) + ' · ' + form + ' · 資金 ' + money(gameState.clubFunds);
-  $('#offer-amount').value = current?.counterFee || entry.player.marketValue;
+  $('#counter-offer-detail').hidden = !current?.counterFee;
+  $('#counter-offer-detail').textContent = current?.counterFee ? '相手クラブの要求額: ' + formatOfferAmount(current.counterFee) + ' / 下の金額はあなたの再提示額です。' : '';
+  ui.offerMarketValue = entry.player.marketValue;
+  setOfferAmount(current?.counterFee || entry.player.marketValue);
   ui.offerId = id;
   $('#confirm-title').textContent = current?.counterFee ? 'カウンターオファー' : '移籍オファー';
   $('#confirm-accept').textContent = current?.counterFee ? '再提示する' : 'オファー送信';
-  confirmation = () => submitOffer(id, Number($('#offer-amount').value));
+  confirmation = () => {
+    setOfferAmount($('#offer-amount').value);
+    submitOffer(id, Number($('#offer-amount').value));
+  };
   $('#confirm-dialog').showModal();
 }
 function submitOffer(id, amount) {
@@ -1629,6 +1646,8 @@ document.addEventListener('click', e => {
   else if (d.playerId) togglePlayer(d.playerId);
   else if (d.releaseList) toggleReleaseList(d.releaseList);
   else if (d.sponsor) chooseSponsor(d.sponsor);
+  else if (d.offerAdjust) setOfferAmount(Number($('#offer-amount').value) + Number(d.offerAdjust));
+  else if (d.offerQuick) setOfferAmount((ui.offerMarketValue || 0) * Number(d.offerQuick) / 100);
   else if (d.acceptOffer) respondIncomingOffer(d.acceptOffer, true);
   else if (d.rejectOffer) respondIncomingOffer(d.rejectOffer, false);
   else if (d.offer) openOfferDialog(d.offer);
@@ -1654,6 +1673,7 @@ document.addEventListener('click', e => {
 });
 $('#open-winter-market').addEventListener('click', openWinterMarket);
 $('#transfer-search').addEventListener('input', e => { ui.search = e.target.value; renderTransfer(); });
+$('#offer-amount').addEventListener('input', refreshOfferAmountDisplay);
 $('#development-sort').addEventListener('change', e => { ui.developmentSort = e.target.value; renderDevelopment(); });
 $('#development-season').addEventListener('change', e => { ui.reportSeason = Number(e.target.value); renderDevelopment(); });
 $('#start-next-season').addEventListener('click', () => startNextSeason());

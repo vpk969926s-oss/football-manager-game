@@ -234,7 +234,15 @@
       </div>
       <div id="offer-options" hidden>
         <p id="offer-player"></p>
+        <p id="counter-offer-detail" class="contract-note" hidden></p>
+        <p id="offer-amount-display" class="offer-amount-display">€0.0M</p>
         <label class="sort-label">移籍金 <input id="offer-amount" type="number" min="1" step="50000" /></label>
+        <div class="offer-controls" role="group" aria-label="移籍金調整">
+          <button type="button" data-offer-adjust="-5000000">−€5M</button><button type="button" data-offer-adjust="-1000000">−€1M</button><button type="button" data-offer-adjust="1000000">＋€1M</button><button type="button" data-offer-adjust="5000000">＋€5M</button>
+        </div>
+        <div class="offer-controls" role="group" aria-label="クイック提示">
+          <button type="button" data-offer-quick="100">市場価値</button><button type="button" data-offer-quick="110">110%</button><button type="button" data-offer-quick="125">125%</button><button type="button" data-offer-quick="150">150%</button>
+        </div>
         <button id="counter-accept" class="secondary-button" type="button" hidden>カウンター額を受諾</button>
       </div>
       <div class="dialog-actions"><button id="confirm-cancel" class="secondary-button" type="button">キャンセル</button><button id="confirm-accept" class="primary-button" type="button">確定</button></div>

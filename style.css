@@ -80,6 +80,9 @@ dialog::backdrop { background: #020609c9; }
 dialog p { line-height: 1.7; margin-top: 18px; overflow-wrap: anywhere; }
 .dialog-actions { display: flex; gap: 12px; }
 .dialog-actions > button { flex: 1; width: auto; margin: 0; }
+.offer-amount-display { margin: 14px 0 8px; color: var(--green); font-size: clamp(28px, 9vw, 40px); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+.offer-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.offer-controls button { min-height: 46px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--text); font-size: 14px; font-weight: 700; }
 @media (min-width: 760px) { .transfer-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .notice { bottom: 24px; } }
 @media (prefers-reduced-motion: reduce) { .screen { animation: none !important; } }
 html { min-width: 320px; background: var(--bg); }

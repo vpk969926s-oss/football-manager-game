@@ -175,6 +175,7 @@
             <button class="filter-button" data-transfer-filter="LW" type="button">LW</button><button class="filter-button" data-transfer-filter="CF" type="button">CF</button><button class="filter-button" data-transfer-filter="RW" type="button">RW</button>
           </div>
           <label class="sort-label">並び替え <select id="transfer-sort"><option value="ovr">OVR 高い順</option><option value="price">移籍金 安い順</option><option value="price-desc">移籍金 高い順</option></select></label>
+          <section id="incoming-offers" class="development-list" aria-live="polite"></section>
           <p id="transfer-count"></p>
           <div id="transfer-list" class="transfer-list"></div>
         </section>
@@ -195,6 +196,13 @@
             <option value="ovr">現在OVR順</option><option value="age">年齢順</option>
           </select></label>
           <div id="development-list" class="development-list"></div>
+        </section>
+        <section id="market-values-screen" class="screen" aria-labelledby="screen-title" hidden>
+          <p class="eyebrow green">冬の移籍市場前</p>
+          <h2>市場価値改定レポート</h2>
+          <p>前半戦の出場・直近フォームを反映して、自クラブ選手の市場価値を更新しました。</p>
+          <div id="market-value-list" class="development-list"></div>
+          <button id="open-winter-market" class="primary-button" type="button">冬の移籍市場へ</button>
         </section>
       </main>
     </div>

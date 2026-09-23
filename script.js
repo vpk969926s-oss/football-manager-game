@@ -8,8 +8,8 @@ const clubs = [
 'use strict';
 const USER = 'northbridge';
 const SAVE_KEY = 'northbridge.club-manager.v4';
-const VERSION = 9;
-const SAVE_VERSIONS = [4, 5, 6, 7, 8, VERSION];
+const VERSION = 10;
+const SAVE_VERSIONS = [4, 5, 6, 7, 8, 9, VERSION];
 const DEFAULT_CLUB_PROFILE = { name: 'Northbridge FC', shortName: 'NB', homeCity: 'England' };
 const LEAGUE = { matchdays: (clubs.length - 1) * 2, winterAfter: clubs.length - 1 };
 const POSITIONS = ['GK','RB','CB','LB','DM','CM','AM','RW','LW','CF'];
@@ -189,6 +189,7 @@ function validateSave(s) {
       if (m.played) {
         m.homeGoals = Array.isArray(m.homeGoals) ? m.homeGoals : [];
         m.awayGoals = Array.isArray(m.awayGoals) ? m.awayGoals : [];
+        m.substitutions = Array.isArray(m.substitutions) ? m.substitutions : [];
       }
     });
   });
@@ -262,6 +263,7 @@ function migrateSave(s) {
       if (m.played) {
         m.homeGoals = Array.isArray(m.homeGoals) ? m.homeGoals : [];
         m.awayGoals = Array.isArray(m.awayGoals) ? m.awayGoals : [];
+        m.substitutions = Array.isArray(m.substitutions) ? m.substitutions : [];
       }
     });
   });
@@ -545,8 +547,11 @@ function settleMatchday() {
   recordFinance('wage','選手給与',-wage);
   recordFinance('maintenance','クラブ維持費',-maintenance);
   for(const c of clubs) {
-    const pool=c.id===USER ? selected() : pickLineup(gameState.squads[c.id]).map(id=>gameState.squads[c.id].find(p=>p.id===id)).filter(Boolean);
-    pool.forEach(p=>{p.fatigue=Math.min(100,p.fatigue+20+Math.floor(Math.random()*11));});
+    const pool=c.id===USER ? (m.playerRatings || []).map(r=>playerById(r.playerId)).filter(Boolean) : pickLineup(gameState.squads[c.id]).map(id=>gameState.squads[c.id].find(p=>p.id===id)).filter(Boolean);
+    pool.forEach(p=>{
+      const substitute = c.id === USER && m.substitutions?.some(sub => sub.playerInId === p.id);
+      p.fatigue=Math.min(100,p.fatigue+(substitute ? 10+Math.floor(Math.random()*9) : 20+Math.floor(Math.random()*11)));
+    });
   }
   m.settlement={gate,wage,maintenance,net:gate-wage-maintenance,fatigue:averageFatigue()};
   const result=gameState.results.find(r=>r.id===m.id); if(result) result.settlement={...m.settlement};
@@ -836,14 +841,14 @@ function pickScorer(pool) {
   }
   return pool[0];
 }
-function generateGoalEvents(clubId, goalCount) {
+function generateGoalEvents(clubId, goalCount, poolAtMinute) {
   if (goalCount <= 0) return [];
   const pool = clubId === USER ? (selected().length === 11 ? selected() : squad()) : (gameState.squads[clubId] || []);
   if (!pool.length) return [];
   const events = [];
   for (let i = 0; i < goalCount; i++) {
-    const scorer = pickScorer(pool);
     const minute = Math.floor(Math.random() * 90) + 1;
+    const scorer = pickScorer(poolAtMinute ? poolAtMinute(minute) : pool);
     events.push({ minute, playerId: scorer.id, playerName: scorer.name });
   }
   return events.sort((a, b) => a.minute - b.minute);
@@ -851,10 +856,10 @@ function generateGoalEvents(clubId, goalCount) {
 function playerSeasonStats(id) {
   return gameState.seasonPlayerStats[id] ||= { appearances: 0, goals: 0, assists: 0, ratingTotal: 0, ratingCount: 0 };
 }
-function addGoalAssists(events, starters) {
+function addGoalAssists(events, poolAtMinute) {
   events.forEach(goal => {
     if (Math.random() >= .75) return;
-    const candidates = starters.filter(p => p.id !== goal.playerId);
+    const candidates = poolAtMinute(goal.minute).filter(p => p.id !== goal.playerId);
     if (!candidates.length) return;
     const weights = candidates.map(p => ['DM','CM','AM','RW','LW'].includes(p.position) ? 3 : 1);
     let roll = Math.random() * weights.reduce((sum, weight) => sum + weight, 0);
@@ -863,16 +868,42 @@ function addGoalAssists(events, starters) {
     goal.assistPlayerName = assister.name;
   });
 }
-function recordUserMatchStats(match) {
-  const starters = selected();
+function createAutoSubstitutions(starters, bench) {
+  const wanted = Math.min(3, bench.length, starters.filter(p => p.position !== 'GK').length);
+  const count = wanted >= 2 ? Math.min(wanted, 2 + Math.floor(Math.random() * 2)) : wanted;
+  const usedOut = new Set(), usedIn = new Set(), substitutions = [];
+  const outs = [...starters].filter(p => p.position !== 'GK').sort((a,b) => (b.fatigue + Math.random() * 20) - (a.fatigue + Math.random() * 20));
+  for (const out of outs) {
+    if (substitutions.length >= count || usedOut.has(out.id)) break;
+    const candidates = bench.filter(player => !usedIn.has(player.id) && positionSuitability(player.position, out.position) > 0);
+    if (!candidates.length) continue;
+    const playerIn = candidates.sort((a,b) => positionSuitability(b.position,out.position) - positionSuitability(a.position,out.position) || b.ovr-a.ovr)[0];
+    usedOut.add(out.id); usedIn.add(playerIn.id);
+    substitutions.push({ minute: 55 + Math.floor(Math.random() * 26), playerOutId: out.id, playerOutName: out.name, playerInId: playerIn.id, playerInName: playerIn.name });
+  }
+  return substitutions.sort((a,b) => a.minute-b.minute);
+}
+function userPlayersAtMinute(starters, substitutions, minute) {
+  const onPitch = starters.slice();
+  substitutions.filter(sub => sub.minute <= minute).forEach(sub => {
+    const index = onPitch.findIndex(player => player.id === sub.playerOutId);
+    const playerIn = playerById(sub.playerInId);
+    if (index >= 0 && playerIn) onPitch[index] = playerIn;
+  });
+  return onPitch;
+}
+function recordUserMatchStats(match, starters, substitutions) {
   const userGoals = match.home === USER ? match.homeGoals : match.awayGoals;
   const oppositionScore = match.home === USER ? match.awayScore : match.homeScore;
   const userScore = match.home === USER ? match.homeScore : match.awayScore;
-  addGoalAssists(userGoals, starters);
-  const ratings = starters.map(player => {
+  const poolAtMinute = minute => userPlayersAtMinute(starters, substitutions, minute);
+  addGoalAssists(userGoals, poolAtMinute);
+  const participants = [...starters, ...substitutions.map(sub => playerById(sub.playerInId)).filter(Boolean)];
+  const ratings = participants.map(player => {
     const goals = userGoals.filter(goal => goal.playerId === player.id).length;
     const assists = userGoals.filter(goal => goal.assistPlayerId === player.id).length;
-    let rating = 6.4 + (userScore > oppositionScore ? .45 : userScore < oppositionScore ? -.45 : 0) +
+    const substitute = substitutions.some(sub => sub.playerInId === player.id);
+    let rating = (substitute ? 6.2 : 6.4) + (userScore > oppositionScore ? .45 : userScore < oppositionScore ? -.45 : 0) +
       goals * 1.15 + assists * .55 + (oppositionScore === 0 && ['GK','RB','CB','LB'].includes(player.position) ? .35 : 0) +
       (Math.random() * .6 - .3);
     rating = Math.max(5, Math.min(10, Math.round(rating * 10) / 10));
@@ -890,9 +921,11 @@ function playMatch() {
     [m.homeScore, m.awayScore] = simulateScore(m.home, m.away);
     m.played = true;
     populateAttendance(m);
-    m.homeGoals = generateGoalEvents(m.home, m.homeScore);
-    m.awayGoals = generateGoalEvents(m.away, m.awayScore);
-    if (m.home === USER || m.away === USER) recordUserMatchStats(m);
+    m.substitutions = m.home === USER || m.away === USER ? createAutoSubstitutions(selected(), gameState.selectedBench.map(playerById).filter(Boolean)) : [];
+    const userPool = minute => userPlayersAtMinute(selected(), m.substitutions, minute);
+    m.homeGoals = generateGoalEvents(m.home, m.homeScore, m.home === USER ? userPool : null);
+    m.awayGoals = generateGoalEvents(m.away, m.awayScore, m.away === USER ? userPool : null);
+    if (m.home === USER || m.away === USER) recordUserMatchStats(m, selected(), m.substitutions);
     applyResult(gameState.standings, m);
     gameState.results.push({ ...m, matchday: gameState.currentMatchday, season: gameState.season });
   });
@@ -1059,6 +1092,13 @@ function renderMatch() {
             `<li class="scorer-item"><span class="scorer-name">${escapeHTML(player.playerName)}　${player.position}　${player.goals}G ${player.assists}A</span><strong>${player.rating.toFixed(1)}</strong></li>`
           ).join('')}</ul>
         </section>` : '';
+      const substitutionsHtml = (m.substitutions || []).length ? `
+        <section class="scorers-section">
+          <div class="scorers-heading">交代</div>
+          <ul class="scorers-list">${m.substitutions.map(sub =>
+            `<li class="scorer-item"><span class="scorer-minute">${sub.minute}'</span><span class="scorer-name">${escapeHTML(sub.playerOutName)} → ${escapeHTML(sub.playerInName)}</span></li>`
+          ).join('')}</ul>
+        </section>` : '';
 
       const actionButtons = '';
       ftCard.innerHTML = `
@@ -1093,6 +1133,7 @@ function renderMatch() {
           </div>
         </div>
         ${playerRatingsHtml}
+        ${substitutionsHtml}
         <div class="match-actions">
           ${actionButtons}
         </div>

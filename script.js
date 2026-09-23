@@ -108,16 +108,53 @@ function createFixtures(season = 1) {
 function emptyStandings() {
   return clubs.map(c => ({ clubId: c.id, played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0, goalDifference: 0, points: 0 }));
 }
+const GENERATED_FIRST_NAMES = ['Adrian','Bruno','Ciro','Damon','Elias','Felix','Galen','Hugo','Ivo','Jules','Kai','Leon','Marek','Nolan','Otto','Pavel','Quinn','Ruben','Soren','Tomas','Arlo','Bastian','Dario','Emil','Franco','Gideon','Iker','Jovan','Lorenzo','Milan','Nico','Oran','Remy','Sami','Teo','Viktor'];
+const GENERATED_LAST_NAMES = ['Vale','Marlow','Voss','Arden','Keller','Rowan','Linden','Bell','Hale','Carter','Dunham','Everett','Farrow','Grimaldi','Harrow','Ibarra','Jensen','Kovac','Lennox','Moreau','Neri','Ortega','Parker','Quill','Rossi','Serrano','Toland','Usher','Valenti','Wren'];
+function randomAge() {
+  const r = Math.random();
+  if (r < .10) return 17 + Math.floor(Math.random() * 4);
+  if (r < .43) return 21 + Math.floor(Math.random() * 5);
+  if (r < .78) return 26 + Math.floor(Math.random() * 4);
+  if (r < .94) return 30 + Math.floor(Math.random() * 3);
+  return 33 + Math.floor(Math.random() * 3);
+}
+function randomOVR(strength) {
+  let ovr = Math.round(strength + (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 8);
+  const r = Math.random();
+  if (r < .035) ovr += 8 + Math.floor(Math.random() * 5);
+  else if (r < .15) ovr -= 7 + Math.floor(Math.random() * 7);
+  return Math.max(45, Math.min(90, ovr));
+}
+function randomPotential(age, ovr) {
+  let room = 0;
+  const r = Math.random();
+  if (age <= 20) room = r < .035 ? 20 + Math.floor(Math.random() * 8) : r < .18 ? 12 + Math.floor(Math.random() * 8) : r < .58 ? 5 + Math.floor(Math.random() * 8) : Math.floor(Math.random() * 5);
+  else if (age <= 24) room = r < .06 ? 12 + Math.floor(Math.random() * 7) : r < .38 ? 4 + Math.floor(Math.random() * 8) : Math.floor(Math.random() * 4);
+  else if (age <= 28) room = r < .16 ? 3 + Math.floor(Math.random() * 5) : Math.floor(Math.random() * 3);
+  else room = Math.random() < .18 ? 1 : 0;
+  return Math.min(99, ovr + room);
+}
+function generatedPlayer(id, number, position, strength, nameIndex) {
+  const age = randomAge(), ovr = randomOVR(strength);
+  const player = makePlayer(id, number, GENERATED_FIRST_NAMES[nameIndex % GENERATED_FIRST_NAMES.length] + ' ' + GENERATED_LAST_NAMES[(nameIndex * 7 + Math.floor(Math.random() * GENERATED_LAST_NAMES.length)) % GENERATED_LAST_NAMES.length], age, position, ovr);
+  player.pot = randomPotential(age, ovr);
+  player.marketValue = marketValue(age, position, ovr, player.pot);
+  player.transferFee = Math.round(player.marketValue * 1.15 / 50000) * 50000;
+  player.wage = calculateWage(player);
+  return player;
+}
+function initialCpuPositions(size) {
+  const positions = ['GK','GK','RB','RB','CB','CB','CB','CB','LB','LB','DM','DM','CM','CM','CM','AM','RW','RW','LW','LW','CF','CF'];
+  const extras = ['GK','RB','CB','LB','DM','CM','AM','RW','LW','CF'];
+  while (positions.length < size) positions.push(extras[Math.floor(Math.random() * extras.length)]);
+  return positions;
+}
 function newGame(profile) {
   const squads = { [USER]: initialPlayers.map(p => makePlayer('nb-' + p[0], ...p)) };
-  const firstNames = ['Adrian','Bruno','Ciro','Damon','Elias','Felix','Galen','Hugo','Ivo','Jules','Kai','Leon','Marek','Nolan','Otto','Pavel','Quinn','Ruben','Soren','Tomas'];
-  const lastNames = ['Vale','Marlow','Voss','Arden','Keller','Rowan','Linden','Bell','Hale'];
-  const roles = ['GK','GK', ...Array(6).fill('DEF'), ...Array(6).fill('MID'), ...Array(6).fill('FWD')];
   clubs.filter(c => c.cpu).forEach((club, ci) => {
-    squads[club.id] = roles.map((position, i) => makePlayer(
-      club.id + '-' + (i + 1), String(i + 1).padStart(2,'0'),
-      firstNames[(i + ci * 3) % 20] + ' ' + lastNames[ci],
-      19 + (i * 3 + ci) % 15, position, Math.max(50, Math.min(88, club.strength + (i * 7 + ci) % 15 - 6))
+    const size = 26 + Math.floor(Math.random() * 5);
+    squads[club.id] = initialCpuPositions(size).map((position, i) => generatedPlayer(
+      club.id + '-' + (i + 1), String(i + 1), position, club.strength, ci * 40 + i
     ));
   });
   const state = { version: VERSION, clubProfile: normalizeClubProfile(profile) || { ...DEFAULT_CLUB_PROFILE },
@@ -130,7 +167,13 @@ function newGame(profile) {
     recentPlayerForm: {}, transferNegotiations: {}, transferRejected: {} };
   upgradeManagement(state);
   applyClubIdentity(state);
-  ensureFreeAgentPool(state);
+  const freePositions = Array.from({ length: 100 }, (_, i) => POSITIONS[i % POSITIONS.length]);
+  state.freeAgents = freePositions.map((position, i) => {
+    const p = generatedPlayer('fa-' + (i + 1), String(i + 1), position, 64, 500 + i);
+    p.contractYears = 0;
+    return p;
+  });
+  state.nextPlayerId = 101;
   return state;
 }
 function validateSave(s) {

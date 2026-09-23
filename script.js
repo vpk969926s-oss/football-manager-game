@@ -470,7 +470,7 @@ function pickLineup(players) {
     for (const [mask, state] of states) SLOTS.forEach((slot,i) => {
       const fit=positionSuitability(p.position,slot);
       if (!fit || (mask & (1<<i))) return;
-      const key=mask | (1<<i), score=state.score+1000000+fit*10000+p.ovr;
+      const key=mask | (1<<i), score=state.score+1000000+fit*10000+effectiveOVR(p)*100+p.ovr;
       if (!next.has(key) || next.get(key).score<score) {
         const lineup=state.lineup.slice(); lineup[i]=p.id;
         next.set(key,{score,lineup});
@@ -702,8 +702,19 @@ function syncLineup() {
 function autoPickBestXI() {
   gameState.lineup = pickLineup(squad());
   gameState.selectedStartingXI = gameState.lineup.filter(Boolean);
-  syncBench();
-  ui.activeSlot = null; commit('4-3-3のベストメンバーを編成しました。');
+  const remaining = squad().filter(player => !gameState.selectedStartingXI.includes(player.id))
+    .sort((a,b) => effectiveOVR(b) - effectiveOVR(a) || b.ovr - a.ovr);
+  const picked = [];
+  for (const group of ['GK','DEF','MID','FWD']) {
+    const player = remaining.find(candidate => positionGroup(candidate.position) === group && !picked.includes(candidate.id));
+    if (player) picked.push(player.id);
+  }
+  for (const player of remaining) {
+    if (picked.length >= 5) break;
+    if (!picked.includes(player.id)) picked.push(player.id);
+  }
+  gameState.selectedBench = picked;
+  ui.activeSlot = null; commit('スタメン＋ベンチを自動編成しました。');
 }
 function clearStartingXI() {
   gameState.selectedStartingXI = [];

@@ -1406,6 +1406,9 @@ function renderDashboard() {
   document.title = profile.name + ' | Club Manager';
   const brandName = $('#brand-name'); if (brandName) brandName.textContent = profile.name;
   const brandCity = $('#brand-city'); if (brandCity) brandCity.textContent = profile.homeCity;
+  const fansLabel = 'ファン ' + gameState.fanCount.toLocaleString();
+  const sidebarFans = $('#sidebar-fans'); if (sidebarFans) sidebarFans.textContent = fansLabel;
+  const topbarFans = $('#topbar-fans'); if (topbarFans) topbarFans.textContent = fansLabel;
   const heroName = $('#hero-club-name'); if (heroName) heroName.textContent = profile.name;
   const heroCopy = $('#hero-club-copy'); if (heroCopy) heroCopy.textContent = profile.homeCity + ' をホームタウンに、クラブの現在地を確認して次の一手を決めよう。';
   const crest = $('#hero-crest-mark'); if (crest) crest.textContent = userClub.short;

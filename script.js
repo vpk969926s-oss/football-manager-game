@@ -932,7 +932,7 @@ function renderManagement() {
   }).join('') || '<p>取引・試合の収支はまだありません。</p>';
   const sponsor = gameState.activeSponsor;
   const sponsorIncome = entries.filter(e => e.type.startsWith('sponsor-')).reduce((n,e) => n + e.amount, 0);
-  $('#finance-history').insertAdjacentHTML('beforebegin', `<section class="finance-panel"><h3>スポンサー</h3>${sponsor ? `<p>${escapeHTML(sponsor.name)} · ${sponsor.type}</p><p>契約金 ${money(sponsor.signingFee)} / 毎節 ${money(sponsor.weeklyPayment)} / 勝利 ${money(sponsor.winBonus)}</p><p>順位ボーナス: ${rankBonusLabel(sponsor)}</p><p>今季スポンサー収入 <strong>${money(sponsorIncome)}</strong></p>` : '<p>今シーズンのスポンサーは未契約です。</p>'}</section>`);
+  $('#finance-sponsor').innerHTML = `<section class="finance-panel"><h3>スポンサー</h3>${sponsor ? `<p>${escapeHTML(sponsor.name)} · ${sponsor.type}</p><p>契約金 ${money(sponsor.signingFee)} / 毎節 ${money(sponsor.weeklyPayment)} / 勝利 ${money(sponsor.winBonus)}</p><p>順位ボーナス: ${rankBonusLabel(sponsor)}</p><p>今季スポンサー収入 <strong>${money(sponsorIncome)}</strong></p>` : '<p>今シーズンのスポンサーは未契約です。</p>'}</section>`;
   $('#pending-contracts').innerHTML=gameState.pendingContractDecisions.length ? '<h3>契約満了選手</h3><p>全選手の更新または放出を決定してください。</p>'+gameState.pendingContractDecisions.map(id=>{
     const p=playerById(id);
     return '<article class="season-panel"><h3>'+escapeHTML(p.name)+'</h3><p>'+p.age+'歳 · '+p.position+' · OVR '+p.ovr+' / POT '+p.pot+'</p><p>現在週給 '+money(p.wage)+' · 契約満了</p><button class="primary-button" data-renew="'+id+'">契約更新</button><button class="secondary-button" data-release="'+id+'">フリーで放出</button></article>';

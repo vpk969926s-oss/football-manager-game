@@ -8,8 +8,8 @@ const clubs = [
 'use strict';
 const USER = 'northbridge';
 const SAVE_KEY = 'northbridge.club-manager.v4';
-const VERSION = 7;
-const SAVE_VERSIONS = [4, 5, 6, VERSION];
+const VERSION = 8;
+const SAVE_VERSIONS = [4, 5, 6, 7, VERSION];
 const DEFAULT_CLUB_PROFILE = { name: 'Northbridge FC', shortName: 'NB', homeCity: 'England' };
 const LEAGUE = { matchdays: (clubs.length - 1) * 2, winterAfter: clubs.length - 1 };
 const POSITIONS = ['GK','RB','CB','LB','DM','CM','AM','RW','LW','CF'];
@@ -125,7 +125,7 @@ function newGame(profile) {
     freeAgents: [], nextPlayerId: 1, transferWindowState: 'summer', endOfSeasonRoster: [], retirementHistory: [],
     currentMatchday: 1, fixtures: createFixtures(), standings: emptyStandings(),
     results: [], squads, selectedStartingXI: [], lineup: Array(11).fill(null),
-    clubFunds: 100000000, transfers: [], seasonComplete: false };
+    clubFunds: 100000000, transfers: [], seasonComplete: false, seasonPlayerStats: {} };
   upgradeManagement(state);
   applyClubIdentity(state);
   ensureFreeAgentPool(state);
@@ -143,6 +143,13 @@ function validateSave(s) {
       !Array.isArray(s.freeAgents) || !Array.isArray(s.retirementHistory) || !Array.isArray(s.endOfSeasonRoster) ||
       !Number.isSafeInteger(s.nextPlayerId) || s.nextPlayerId < 1 ||
       !['summer','winter','closed'].includes(s.transferWindowState)) throw Error('Invalid season');
+  if (!s.seasonPlayerStats || typeof s.seasonPlayerStats !== 'object' || Array.isArray(s.seasonPlayerStats)) throw Error('Invalid player stats');
+  for (const stats of Object.values(s.seasonPlayerStats)) {
+    if (!stats || !Number.isInteger(stats.appearances) || stats.appearances < 0 ||
+        !Number.isInteger(stats.goals) || stats.goals < 0 || !Number.isInteger(stats.assists) || stats.assists < 0 ||
+        typeof stats.ratingTotal !== 'number' || !Number.isFinite(stats.ratingTotal) || stats.ratingTotal < 0 ||
+        !Number.isInteger(stats.ratingCount) || stats.ratingCount < 0) throw Error('Invalid player stats');
+  }
   for (const club of [...clubs, { id: 'free' }]) {
     const squad = club.id === 'free' ? s.freeAgents : s.squads?.[club.id];
     if (!Array.isArray(squad)) throw Error('Invalid squad');
@@ -230,6 +237,7 @@ function migrateSave(s) {
   s.retirementHistory ??= [];
   s.endOfSeasonRoster ??= [];
   s.nextPlayerId ??= 1;
+  s.seasonPlayerStats ??= {};
   if (!s.transferWindowState) {
     s.transferWindowState = s.currentMatchday === 1 && !s.fixtures?.[0]?.[0]?.played ? 'summer' : 'closed';
     if ((s.currentMatchday === LEAGUE.winterAfter && s.fixtures?.[LEAGUE.winterAfter - 1]?.[0]?.played) ||
@@ -395,6 +403,7 @@ function startNextSeason(random = Math.random) {
       status: !now ? '引退（更新対象外）' : squad().some(p => p.id === old.id) ? '在籍' : '契約満了' };
   });
   gameState.season++;
+  gameState.seasonPlayerStats = {};
   gameState.playerDevelopmentHistory.push({ season: gameState.season, players: report });
   gameState.currentMatchday = 1;
   gameState.fixtures = createFixtures(gameState.season);
@@ -815,6 +824,40 @@ function generateGoalEvents(clubId, goalCount) {
   }
   return events.sort((a, b) => a.minute - b.minute);
 }
+function playerSeasonStats(id) {
+  return gameState.seasonPlayerStats[id] ||= { appearances: 0, goals: 0, assists: 0, ratingTotal: 0, ratingCount: 0 };
+}
+function addGoalAssists(events, starters) {
+  events.forEach(goal => {
+    if (Math.random() >= .75) return;
+    const candidates = starters.filter(p => p.id !== goal.playerId);
+    if (!candidates.length) return;
+    const weights = candidates.map(p => ['DM','CM','AM','RW','LW'].includes(p.position) ? 3 : 1);
+    let roll = Math.random() * weights.reduce((sum, weight) => sum + weight, 0);
+    const assister = candidates[weights.findIndex(weight => (roll -= weight) <= 0)] || candidates[0];
+    goal.assistPlayerId = assister.id;
+    goal.assistPlayerName = assister.name;
+  });
+}
+function recordUserMatchStats(match) {
+  const starters = selected();
+  const userGoals = match.home === USER ? match.homeGoals : match.awayGoals;
+  const oppositionScore = match.home === USER ? match.awayScore : match.homeScore;
+  const userScore = match.home === USER ? match.homeScore : match.awayScore;
+  addGoalAssists(userGoals, starters);
+  const ratings = starters.map(player => {
+    const goals = userGoals.filter(goal => goal.playerId === player.id).length;
+    const assists = userGoals.filter(goal => goal.assistPlayerId === player.id).length;
+    let rating = 6.4 + (userScore > oppositionScore ? .45 : userScore < oppositionScore ? -.45 : 0) +
+      goals * 1.15 + assists * .55 + (oppositionScore === 0 && ['GK','RB','CB','LB'].includes(player.position) ? .35 : 0) +
+      (Math.random() * .6 - .3);
+    rating = Math.max(5, Math.min(10, Math.round(rating * 10) / 10));
+    const stats = playerSeasonStats(player.id);
+    stats.appearances++; stats.goals += goals; stats.assists += assists; stats.ratingTotal += rating; stats.ratingCount++;
+    return { playerId: player.id, playerName: player.name, position: player.position, goals, assists, rating };
+  });
+  match.playerRatings = ratings;
+}
 function playMatch() {
   if (gameState.seasonComplete || currentFixture().played) return;
   if (transferWindow().open) return notify('先に シーズン開始 / シーズン再開 で移籍期間を終了してください。');
@@ -825,6 +868,7 @@ function playMatch() {
     populateAttendance(m);
     m.homeGoals = generateGoalEvents(m.home, m.homeScore);
     m.awayGoals = generateGoalEvents(m.away, m.awayScore);
+    if (m.home === USER || m.away === USER) recordUserMatchStats(m);
     applyResult(gameState.standings, m);
     gameState.results.push({ ...m, matchday: gameState.currentMatchday, season: gameState.season });
   });
@@ -891,7 +935,9 @@ function renderPlayers() {
   document.querySelectorAll('[data-filter]').forEach(b => { b.classList.toggle('active', b.dataset.filter === ui.squadFilter); b.setAttribute('aria-pressed', b.dataset.filter === ui.squadFilter); });
   $('#player-list').innerHTML = sortPlayersForDisplay(squad().filter(p => ui.squadFilter === 'all' || (p.position === ui.squadFilter || positionGroup(p.position) === ui.squadFilter)), ui.squadSort).map(p => {
     const on = gameState.selectedStartingXI.includes(p.id);
-    return `<article class="squad-player"><button class="player-card ${on ? 'is-starting' : ''}" data-player-id="${p.id}" aria-pressed="${on}" type="button"><span class="player-number">${on ? '✓' : p.number}</span><span><span class="player-name">${escapeHTML(p.name)}</span><span class="player-meta">${p.position} · ${p.age}歳 · 疲労 ${p.fatigue}%</span></span><span class="ovr"><strong>${p.ovr}</strong><span>OVR / POT ${p.pot}</span></span></button><div class="contract-meta">${p.contractYears}年 · 週給 ${money(p.wage)} /週${p.contractYears === 1 ? ' · 今季満了' : ''}</div><div class="player-sale"><span>市場価値 <b>${money(p.marketValue)}</b></span><button class="sell-button" data-renew="${p.id}" type="button">契約更新</button><button class="sell-button" data-sell="${p.id}" type="button" ${transferWindow().open ? '' : 'disabled'}>売却</button></div></article>`;
+    const stats = gameState.seasonPlayerStats[p.id] || { appearances: 0, goals: 0, assists: 0, ratingTotal: 0, ratingCount: 0 };
+    const average = stats.ratingCount ? (stats.ratingTotal / stats.ratingCount).toFixed(2) : '—';
+    return `<article class="squad-player"><button class="player-card ${on ? 'is-starting' : ''}" data-player-id="${p.id}" aria-pressed="${on}" type="button"><span class="player-number">${on ? '✓' : p.number}</span><span><span class="player-name">${escapeHTML(p.name)}</span><span class="player-meta">${p.position} · ${p.age}歳 · 疲労 ${p.fatigue}%</span></span><span class="ovr"><strong>${p.ovr}</strong><span>OVR / POT ${p.pot}</span></span></button><div class="contract-meta">今季 ${stats.appearances}試合 / ${stats.goals}G / ${stats.assists}A / 平均 ${average}</div><div class="contract-meta">${p.contractYears}年 · 週給 ${money(p.wage)} /週${p.contractYears === 1 ? ' · 今季満了' : ''}</div><div class="player-sale"><span>市場価値 <b>${money(p.marketValue)}</b></span><button class="sell-button" data-renew="${p.id}" type="button">契約更新</button><button class="sell-button" data-sell="${p.id}" type="button" ${transferWindow().open ? '' : 'disabled'}>売却</button></div></article>`;
   }).join('');
 }
 function renderTactics() {
@@ -978,6 +1024,13 @@ function renderMatch() {
             ${otherFixtures.map(f => `<li>${escapeHTML(clubById(f.home).short)} ${f.homeScore} – ${f.awayScore} ${escapeHTML(clubById(f.away).short)}</li>`).join('')}
           </ul>
         </details>` : '';
+      const playerRatingsHtml = (m.playerRatings || []).length ? `
+        <section class="scorers-section">
+          <div class="scorers-heading">選手評価</div>
+          <ul class="scorers-list">${[...m.playerRatings].sort((a,b) => b.rating - a.rating).map(player =>
+            `<li class="scorer-item"><span class="scorer-name">${escapeHTML(player.playerName)}　${player.position}　${player.goals}G ${player.assists}A</span><strong>${player.rating.toFixed(1)}</strong></li>`
+          ).join('')}</ul>
+        </section>` : '';
 
       const actionButtons = '';
       ftCard.innerHTML = `
@@ -1011,6 +1064,7 @@ function renderMatch() {
             </div>
           </div>
         </div>
+        ${playerRatingsHtml}
         <div class="match-actions">
           ${actionButtons}
         </div>

@@ -149,11 +149,13 @@
           <div class="pitch-wrap">
             <div id="pitch" class="pitch" aria-label="4-3-3 formation pitch"></div>
           </div>
-          <div class="bench-heading"><div><p class="eyebrow">控え選手</p><h3>タップで入れ替え</h3></div><span id="tactics-hint">ピッチの枠、控えの順にタップ</span></div>
+          <div class="bench-heading"><div><p class="eyebrow">ベンチ</p><h3 id="bench-count">ベンチ 0 / 5</h3></div><span id="tactics-hint">選手をタップして登録・解除</span></div>
           <label class="sort-label">控えの並び順 <select id="bench-sort">
             <option value="default">標準</option>
             <option value="position">ポジション順</option>
           </select></label>
+          <div id="registered-bench-list" class="bench-list"></div>
+          <div class="bench-heading"><div><p class="eyebrow">控え選手</p><h3>その他の控え選手</h3></div></div>
           <div id="bench-list" class="bench-list"></div>
         </section>
         <section id="transfer-screen" class="screen" aria-labelledby="screen-title" hidden>

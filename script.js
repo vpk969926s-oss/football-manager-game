@@ -8,8 +8,8 @@ const clubs = [
 'use strict';
 const USER = 'northbridge';
 const SAVE_KEY = 'northbridge.club-manager.v4';
-const VERSION = 8;
-const SAVE_VERSIONS = [4, 5, 6, 7, VERSION];
+const VERSION = 9;
+const SAVE_VERSIONS = [4, 5, 6, 7, 8, VERSION];
 const DEFAULT_CLUB_PROFILE = { name: 'Northbridge FC', shortName: 'NB', homeCity: 'England' };
 const LEAGUE = { matchdays: (clubs.length - 1) * 2, winterAfter: clubs.length - 1 };
 const POSITIONS = ['GK','RB','CB','LB','DM','CM','AM','RW','LW','CF'];
@@ -124,7 +124,7 @@ function newGame(profile) {
     season: 1, seasonHistory: [], playerDevelopmentHistory: [],
     freeAgents: [], nextPlayerId: 1, transferWindowState: 'summer', endOfSeasonRoster: [], retirementHistory: [],
     currentMatchday: 1, fixtures: createFixtures(), standings: emptyStandings(),
-    results: [], squads, selectedStartingXI: [], lineup: Array(11).fill(null),
+    results: [], squads, selectedStartingXI: [], selectedBench: [], lineup: Array(11).fill(null),
     clubFunds: 100000000, transfers: [], seasonComplete: false, seasonPlayerStats: {} };
   upgradeManagement(state);
   applyClubIdentity(state);
@@ -174,6 +174,9 @@ function validateSave(s) {
       s.lineup.filter(Boolean).length !== s.selectedStartingXI.length ||
       new Set(s.lineup.filter(Boolean)).size !== s.selectedStartingXI.length ||
       s.lineup.filter(Boolean).some(id => !s.selectedStartingXI.includes(id))) throw Error('Invalid XI');
+  if (!Array.isArray(s.selectedBench) || s.selectedBench.length > 5 ||
+      new Set(s.selectedBench).size !== s.selectedBench.length ||
+      s.selectedBench.some(id => !userIds.has(id) || s.selectedStartingXI.includes(id))) throw Error('Invalid bench');
   const expected = createFixtures(s.season);
   if (!Array.isArray(s.fixtures) || s.fixtures.length !== LEAGUE.matchdays) throw Error('Invalid fixtures');
   s.fixtures.forEach((round, day) => {
@@ -238,6 +241,7 @@ function migrateSave(s) {
   s.endOfSeasonRoster ??= [];
   s.nextPlayerId ??= 1;
   s.seasonPlayerStats ??= {};
+  s.selectedBench ??= [];
   if (!s.transferWindowState) {
     s.transferWindowState = s.currentMatchday === 1 && !s.fixtures?.[0]?.[0]?.played ? 'summer' : 'closed';
     if ((s.currentMatchday === LEAGUE.winterAfter && s.fixtures?.[LEAGUE.winterAfter - 1]?.[0]?.played) ||
@@ -264,6 +268,7 @@ function migrateSave(s) {
   if (s.version === 4) ensureFreeAgentPool(s);
   ensureClubProfile(s);
   upgradeManagement(s);
+  s.selectedBench = s.selectedBench.filter(id => s.squads[USER]?.some(p => p.id === id) && !s.selectedStartingXI.includes(id)).slice(0, 5);
   s.version = VERSION;
   return s;
 }
@@ -356,6 +361,7 @@ function finishSeason(random = Math.random) {
   gameState.freeAgents = unattached;
   const owned = new Set(squad().map(p => p.id));
   gameState.selectedStartingXI = gameState.selectedStartingXI.filter(id => owned.has(id));
+  gameState.selectedBench = gameState.selectedBench.filter(id => owned.has(id) && !gameState.selectedStartingXI.includes(id));
   gameState.lineup = gameState.lineup.map(id => owned.has(id) ? id : null);
   ui.activeSlot = null;
 }
@@ -551,6 +557,7 @@ function releaseExpired(id) {
   const p=playerById(id); if(!p) return;
   gameState.squads[USER]=squad().filter(p=>p.id!==id);
   gameState.selectedStartingXI=gameState.selectedStartingXI.filter(x=>x!==id);
+  gameState.selectedBench=gameState.selectedBench.filter(x=>x!==id);
   gameState.lineup=gameState.lineup.map(x=>x===id ? null : x);
   gameState.freeAgents.push(p);
   gameState.pendingContractDecisions=gameState.pendingContractDecisions.filter(x=>x!==id);
@@ -650,6 +657,20 @@ function togglePlayer(id) {
   else return notify('スタメンは最大11人です。先に1人解除してください。');
   ui.activeSlot = null;
   syncLineup();
+  syncBench();
+  commit();
+}
+function syncBench() {
+  const owned = new Set(squad().map(p => p.id));
+  gameState.selectedBench = gameState.selectedBench.filter(id => owned.has(id) && !gameState.selectedStartingXI.includes(id)).slice(0, 5);
+}
+function toggleBenchPlayer(id) {
+  if (!playerById(id) || gameState.selectedStartingXI.includes(id)) return notify('スタメン選手はベンチ登録できません。');
+  if (gameState.selectedBench.includes(id)) gameState.selectedBench = gameState.selectedBench.filter(playerId => playerId !== id);
+  else {
+    if (gameState.selectedBench.length >= 5) return notify('ベンチは5人までです。');
+    gameState.selectedBench.push(id);
+  }
   commit();
 }
 function assignBenchPlayer(id) {
@@ -664,6 +685,7 @@ function assignBenchPlayer(id) {
   if (existing >= 0) gameState.lineup[existing] = old;
   gameState.lineup[slot] = id;
   gameState.selectedStartingXI = gameState.lineup.filter(Boolean);
+  syncBench();
   ui.activeSlot = null;
   commit();
 }
@@ -675,6 +697,7 @@ function syncLineup() {
 function autoPickBestXI() {
   gameState.lineup = pickLineup(squad());
   gameState.selectedStartingXI = gameState.lineup.filter(Boolean);
+  syncBench();
   ui.activeSlot = null; commit('4-3-3のベストメンバーを編成しました。');
 }
 function clearStartingXI() {
@@ -710,6 +733,7 @@ function sellPlayer(id) {
   gameState.squads[buyer.id].push(player);
   recordFinance('transfer-in', '選手売却: ' + player.name, player.marketValue);
   gameState.selectedStartingXI = gameState.selectedStartingXI.filter(p => p !== id);
+  gameState.selectedBench = gameState.selectedBench.filter(p => p !== id);
   gameState.lineup = gameState.lineup.map(p => p === id ? null : p);
   ui.activeSlot = null;
   gameState.transfers.push({ playerId: id, from: USER, to: buyer.id, fee: player.marketValue, season: gameState.season, matchday: gameState.currentMatchday });
@@ -946,12 +970,16 @@ function renderTactics() {
     const p = playerById(gameState.lineup[i]);
     return `<button class="pitch-slot ${p ? '' : 'empty'} ${ui.activeSlot === i ? 'active' : ''}" data-slot-index="${i}" type="button" aria-pressed="${ui.activeSlot === i}" aria-label="${SLOTS[i]} ${p ? escapeHTML(p.name) : '空き'}"><span class="slot-position">${SLOTS[i]}</span><strong>${p ? escapeHTML(p.name) : '＋'}</strong>${p ? '<span>' + p.position + ' · ' + p.ovr + '</span>' : ''}</button>`;
   }).join('') + '</div>').join('');
-  $('#bench-list').innerHTML = sortPlayersForDisplay(squad().filter(p => !gameState.selectedStartingXI.includes(p.id)), ui.benchSort).map(p =>
-    `<button class="bench-player" data-bench-id="${p.id}" type="button"><span><strong>${escapeHTML(p.name)}</strong><span>${p.position} · ${p.age}歳</span></span><span class="bench-ovr">${p.ovr}</span></button>`).join('');
+  const bench = sortPlayersForDisplay(gameState.selectedBench.map(playerById).filter(Boolean), ui.benchSort);
+  const reserves = sortPlayersForDisplay(squad().filter(p => !gameState.selectedStartingXI.includes(p.id) && !gameState.selectedBench.includes(p.id)), ui.benchSort);
+  $('#bench-count').textContent = 'ベンチ ' + bench.length + ' / 5';
+  const card = p => `<button class="bench-player" data-bench-id="${p.id}" type="button"><span><strong>${escapeHTML(p.name)}</strong><span>${p.position} · ${p.age}歳</span></span><span class="bench-ovr">${p.ovr}</span></button>`;
+  $('#registered-bench-list').innerHTML = bench.map(card).join('') || '<p>ベンチ登録選手はいません。</p>';
+  $('#bench-list').innerHTML = reserves.map(card).join('') || '<p>その他の控え選手はいません。</p>';
   const counts = POSITIONS.map(pos => pos + ' ' + selected().filter(p => p.position === pos).length).join(' / ');
   $('#formation-alert').textContent = validFormation() ? '4-3-3のポジション条件を満たしています。' : '必要: GK / LB・CB・CB・RB / DM・CM・CM / LW・CF・RW。現在: ' + counts + '。配置も確認してください。';
   $('#formation-alert').classList.toggle('valid', validFormation());
-  $('#tactics-hint').textContent = ui.activeSlot === null ? 'ピッチ → 控えの順にタップで入れ替え' : '控え、または別のピッチ選手をタップ。同じ枠で取消。';
+  $('#tactics-hint').textContent = ui.activeSlot === null ? '選手をタップしてベンチ登録・解除' : '控え、ベンチ、または別のピッチ選手をタップして入れ替え';
 }
 function renderTransfer() {
   const windowStatus = transferWindow();
@@ -1112,7 +1140,10 @@ document.addEventListener('click', e => {
   else if (d.windowContinue !== undefined) closeTransferWindow();
   else if (d.filter) { ui.squadFilter = d.filter; renderPlayers(); }
   else if (d.transferFilter) { ui.transferFilter = d.transferFilter; renderTransfer(); }
-  else if (d.benchId) assignBenchPlayer(d.benchId);
+  else if (d.benchId) {
+    if (ui.activeSlot !== null) assignBenchPlayer(d.benchId);
+    else toggleBenchPlayer(d.benchId);
+  }
   else if (d.slotIndex !== undefined) {
     const index = Number(d.slotIndex);
     if (ui.activeSlot === index) ui.activeSlot = null;

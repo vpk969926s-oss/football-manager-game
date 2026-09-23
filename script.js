@@ -207,7 +207,7 @@ function newGame(profile) {
     marketValueHistory: [], releaseList: [], incomingOffers: [], endOfSeasonRoster: [], retirementHistory: [],
     currentMatchday: 1, fixtures: createFixtures(), standings: emptyStandings(),
     results: [], squads, selectedStartingXI: [], selectedBench: [], lineup: Array(11).fill(null),
-    clubFunds: 100000000, transfers: [], seasonComplete: false, seasonPlayerStats: {},
+    clubFunds: 100000000, fanCount: 25000, transfers: [], seasonComplete: false, seasonPlayerStats: {},
     recentPlayerForm: {}, transferNegotiations: {}, transferRejected: {} };
   upgradeManagement(state);
   applyClubIdentity(state);
@@ -223,7 +223,7 @@ function newGame(profile) {
 function validateSave(s) {
   if (!s) throw Error('Invalid save');
   ensureClubProfile(s);
-  if (s.version !== VERSION || !s.clubProfile || !Number.isSafeInteger(s.clubFunds) ||
+  if (s.version !== VERSION || !s.clubProfile || !Number.isSafeInteger(s.clubFunds) || !Number.isSafeInteger(s.fanCount) || s.fanCount < 1000 ||
       !Number.isInteger(s.currentMatchday) || s.currentMatchday < 1 || s.currentMatchday > LEAGUE.matchdays ||
       !Array.isArray(s.results) || !Array.isArray(s.transfers) || typeof s.seasonComplete !== 'boolean') throw Error('Invalid save');
   const ids = new Set();
@@ -344,6 +344,7 @@ function migrateSave(s) {
   s.marketValueHistory ??= [];
   s.releaseList ??= [];
   s.incomingOffers ??= [];
+  s.fanCount ??= 25000;
   if (!s.transferWindowState) {
     s.transferWindowState = s.currentMatchday === 1 && !s.fixtures?.[0]?.[0]?.played ? 'summer' : 'closed';
     if ((s.currentMatchday === LEAGUE.winterAfter && s.fixtures?.[LEAGUE.winterAfter - 1]?.[0]?.played) ||
@@ -566,8 +567,11 @@ function finishSeason(random = Math.random) {
   if (!gameState.seasonComplete || gameState.seasonHistory.some(h => h.season === gameState.season)) return;
   const sorted = sortedStandings();
   const userStats = sorted.find(s => s.clubId === USER);
+  const rank = sorted.findIndex(s => s.clubId === USER) + 1;
+  const fanChange = rank === 1 ? 3000 : rank <= 3 ? 1500 : rank <= 5 ? 500 : rank <= 8 ? -250 : -750;
+  gameState.fanCount = Math.max(1000, gameState.fanCount + fanChange);
   gameState.seasonHistory.push({ season: gameState.season, champion: sorted[0].clubId,
-    rank: sorted.findIndex(s => s.clubId === USER) + 1, ...userStats });
+    rank, fanChange, ...userStats });
   gameState.endOfSeasonRoster = squad().map(p => ({ ...p }));
   gameState.transferWindowState = 'closed';
   const unattached = [];
@@ -703,7 +707,7 @@ function renderSeasons() {
   });
   const current = gameState.seasonHistory.find(h => h.season === gameState.season);
   $('#season-summary').innerHTML = gameState.seasonComplete && current
-    ? `<p class="eyebrow green">シーズン ${current.season} 終了</p><h2>優勝: ${escapeHTML(clubById(current.champion).name)}</h2><p>最終順位 ${current.rank}位 · 勝点 ${current.points}</p><p>勝-分-敗: ${current.wins}-${current.draws}-${current.losses}</p><p>得点 ${current.goalsFor} / 失点 ${current.goalsAgainst} / 得失点差 ${current.goalDifference}</p><p>引退と契約年数更新を処理しました。契約満了選手は下で更新・放出を選んでください。次シーズンに年齢・OVR・市場価値を更新します。</p>`
+    ? `<p class="eyebrow green">シーズン ${current.season} 終了</p><h2>優勝: ${escapeHTML(clubById(current.champion).name)}</h2><p>最終順位 ${current.rank}位 · 勝点 ${current.points}</p><p>勝-分-敗: ${current.wins}-${current.draws}-${current.losses}</p><p>得点 ${current.goalsFor} / 失点 ${current.goalsAgainst} / 得失点差 ${current.goalDifference}</p><p>シーズン成績によるファン ${current.fanChange >= 0 ? '+' : ''}${current.fanChange || 0}人</p><p>引退と契約年数更新を処理しました。契約満了選手は下で更新・放出を選んでください。次シーズンに年齢・OVR・市場価値を更新します。</p>`
     : '<p>シーズン ' + gameState.season + ' · シーズン進行中</p>';
   $('#start-next-season').hidden = !gameState.seasonComplete;
   $('#season-history').innerHTML = [...gameState.seasonHistory].reverse().map(h => `<article class="season-panel"><h3>シーズン ${h.season} · ${escapeHTML(clubById(h.champion).name)}</h3><p>優勝クラブ / 自クラブ ${h.rank}位 · ${h.points}勝点</p><p>W-D-L: ${h.wins}-${h.draws}-${h.losses}</p></article>`).join('') || '<p>シーズン終了後に記録されます。</p>';
@@ -792,9 +796,19 @@ function chooseWeeklyAction(action) {
 }
 function recoverPlayers() { Object.values(gameState.squads).flat().forEach(p=>{p.fatigue=Math.max(0,p.fatigue-7);}); }
 function stadiumCapacity(id,state=gameState) { return id===USER ? state.clubProfile.stadiumCapacity : 12000 + clubs.findIndex(c=>c.id===id)*2500; }
+function recentAttendanceForm() {
+  const recent = gameState.results.filter(m => m.home === USER || m.away === USER).slice(-5);
+  const score = recent.reduce((total, m) => total + (outcome(m) === '勝利' ? 1 : outcome(m) === '敗戦' ? -1 : 0), 0);
+  return Math.max(-.1, Math.min(.1, score * .02));
+}
 function populateAttendance(m,state=gameState,legacy=false) {
   m.stadiumCapacity ??= stadiumCapacity(m.home,state);
-  m.attendance ??= Math.round(m.stadiumCapacity*(legacy ? .75 : .5+Math.random()*.5));
+  if (m.attendance == null) {
+    const homeDemand = m.home === USER && !legacy
+      ? .63 + Math.min(.20, state.fanCount / m.stadiumCapacity * .09) + recentAttendanceForm() + (Math.random() * .06 - .03)
+      : legacy ? .75 : .5 + Math.random() * .5;
+    m.attendance = Math.round(m.stadiumCapacity * Math.max(0, Math.min(1, homeDemand)));
+  }
   m.occupancy = m.attendance/m.stadiumCapacity;
   m.gateRevenue = m.attendance*30;
 }
@@ -803,6 +817,16 @@ function weeklyWages() { return squad().reduce((n,p)=>n+p.wage,0); }
 function recordFinance(type,description,amount) {
   gameState.financeLedger.push({season:gameState.season,matchday:gameState.currentMatchday,type,description,amount});
   gameState.clubFunds += amount;
+}
+function updateFansAfterMatch(match) {
+  const opponent = match.home === USER ? match.away : match.home;
+  const difficulty = Math.max(-75, Math.min(75, (teamProfile(opponent).overall - teamProfile(USER).overall) * 8));
+  const result = outcome(match);
+  const base = result === '勝利' ? 200 + Math.floor(Math.random() * 151) + difficulty :
+    result === '引分' ? -25 + Math.floor(Math.random() * 101) + difficulty * .25 : -(50 + Math.floor(Math.random() * 126)) + difficulty;
+  const before = gameState.fanCount;
+  gameState.fanCount = Math.max(1000, Math.round(before + base));
+  return { fanChange: gameState.fanCount - before, fansAfter: gameState.fanCount };
 }
 function settleMatchday() {
   const key=gameState.season+':'+gameState.currentMatchday;
@@ -818,7 +842,8 @@ function settleMatchday() {
       p.fatigue=Math.min(100,p.fatigue+(substitute ? 10+Math.floor(Math.random()*9) : 20+Math.floor(Math.random()*11)));
     });
   }
-  m.settlement={gate,wage,maintenance,net:gate-wage-maintenance,fatigue:averageFatigue()};
+  const fanUpdate = updateFansAfterMatch(m);
+  m.settlement={gate,wage,maintenance,net:gate-wage-maintenance,fatigue:averageFatigue(),...fanUpdate};
   const result=gameState.results.find(r=>r.id===m.id); if(result) result.settlement={...m.settlement};
   gameState.financeSettlements.push(key);
 }
@@ -845,7 +870,7 @@ function renderManagement() {
   if(m.played) {
     const settlement=m.settlement;
     const details='<section class="match-finance"><h3>試合収支</h3><p>観客数 '+m.attendance.toLocaleString()+' / '+m.stadiumCapacity.toLocaleString()+'人 · 収容率 '+Math.round(m.occupancy*100)+'%</p>'+
-      (settlement ? '<p>入場料 '+money(settlement.gate)+'</p><p>給与 '+money(-settlement.wage)+' / 維持費 '+money(-settlement.maintenance)+'</p><p>今節収支 '+money(settlement.net)+'</p><p>試合後平均疲労 '+settlement.fatigue+'%</p>' : '<p>移行前の試合：過去の給与・維持費は遡って請求しません。</p>')+'</section>';
+      (settlement ? '<p>入場料 '+money(settlement.gate)+'</p><p>給与 '+money(-settlement.wage)+' / 維持費 '+money(-settlement.maintenance)+'</p><p>今節収支 '+money(settlement.net)+'</p>'+(settlement.fanChange !== undefined ? '<p>ファン '+(settlement.fanChange >= 0 ? '+' : '')+settlement.fanChange+'人 · 現在 '+settlement.fansAfter.toLocaleString()+'人</p>' : '')+'<p>試合後平均疲労 '+settlement.fatigue+'%</p>' : '<p>移行前の試合：過去の給与・維持費は遡って請求しません。</p>')+'</section>';
     $('#match-fulltime-card').insertAdjacentHTML('beforeend',details);
   }
   $('#weekly-actions').hidden=!m.played;
@@ -855,7 +880,7 @@ function renderManagement() {
   const entries=gameState.financeLedger.filter(e=>e.season===gameState.season);
   const sum=type=>entries.filter(e=>e.type===type).reduce((n,e)=>n+e.amount,0);
   const income=entries.filter(e=>e.amount>0).reduce((n,e)=>n+e.amount,0),expense=-entries.filter(e=>e.amount<0).reduce((n,e)=>n+e.amount,0);
-  $('#finance-summary').innerHTML=Object.entries({'現在資金':gameState.clubFunds,'今季総収入':income,'今季総支出':expense,'今季収支':income-expense,'1節の選手給与':weeklyWages(),'1節の維持費':maintenanceCost(),'ホーム試合収入':sum('gate'),'移籍収入':sum('transfer-in'),'移籍支出':-sum('transfer-out')}).map(([label,value])=>'<article class="stat-card"><span>'+label+'</span><strong>'+money(value)+'</strong></article>').join('');
+  $('#finance-summary').innerHTML=Object.entries({'現在資金':gameState.clubFunds,'ファン人数':gameState.fanCount+'人','今季総収入':income,'今季総支出':expense,'今季収支':income-expense,'1節の選手給与':weeklyWages(),'1節の維持費':maintenanceCost(),'ホーム試合収入':sum('gate'),'移籍収入':sum('transfer-in'),'移籍支出':-sum('transfer-out')}).map(([label,value])=>'<article class="stat-card"><span>'+label+'</span><strong>'+ (label === 'ファン人数' ? Number(gameState.fanCount).toLocaleString()+'人' : money(value)) +'</strong></article>').join('');
   $('#finance-history').innerHTML=[...new Set(entries.map(e=>e.matchday))].reverse().map(day=>{
     const rows=entries.filter(e=>e.matchday===day);
     return '<article class="season-panel"><h3>第'+day+'節</h3>'+rows.map(e=>'<p>'+escapeHTML(e.description)+' <strong>'+money(e.amount)+'</strong></p>').join('')+'<p>収支 '+money(rows.reduce((n,e)=>n+e.amount,0))+'</p></article>';
@@ -1325,6 +1350,7 @@ function renderDashboard() {
   $('#dashboard-position').textContent = (sortedStandings().findIndex(s => s.clubId === USER) + 1) + '位';
   $('#dashboard-points').textContent = stats.points;
   $('#dashboard-matchday').textContent = gameState.seasonComplete ? '終了' : gameState.currentMatchday + ' / ' + LEAGUE.matchdays;
+  $('#dashboard-fans').textContent = gameState.fanCount.toLocaleString() + '人';
   const next = gameState.fixtures.flat().find(m => !m.played && (m.home === USER || m.away === USER));
   $('#dashboard-opponent').textContent = next ? (next.home === USER ? 'ホーム · ' : 'アウェイ · ') + clubById(next.home === USER ? next.away : next.home).name : 'シーズン終了';
   const last = gameState.results.filter(m => m.home === USER || m.away === USER).at(-1);

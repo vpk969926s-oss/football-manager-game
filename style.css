@@ -47,6 +47,14 @@ button:focus-visible, select:focus-visible { outline: 3px solid var(--amber); ou
 .transfer-heading p { font-size: 14px; line-height: 1.6; color: var(--muted); }
 .rating { font-size: 25px; color: var(--green); }
 .rating small { display: block; font-size: 12px; }
+.ovr-90 { color: #e6c76b !important; }
+.ovr-85 { color: #d98bce !important; }
+.ovr-80 { color: #f28c62 !important; }
+.ovr-75 { color: #e5c863 !important; }
+.ovr-70 { color: #71c98a !important; }
+.ovr-65 { color: #57b6a1 !important; }
+.ovr-60 { color: #8ca9c6 !important; }
+.ovr-low { color: #8f98a7 !important; }
 .transfer-card dl { margin: 6px 0 18px; font-size: 14px; }
 .transfer-card dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin: 10px 0; }
 .transfer-card dd { margin: 0; font-variant-numeric: tabular-nums; }

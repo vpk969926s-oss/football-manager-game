@@ -543,16 +543,39 @@ function finishSeason(random = Math.random) {
   gameState.incomingOffers = gameState.incomingOffers.filter(offer => owned.has(offer.playerId));
   ui.activeSlot = null;
 }
+function growthType(player) { return ['rapid','steady','late','plateau','volatile'][hashId(player.id) % 5]; }
+function evolveChange(age, type, roll) {
+  const bands = age <= 20 ? {
+    rapid: [.13,.38,.74,.94], steady: [.24,.61,.91,.99], late: [.47,.78,.94,.995], plateau: [.60,.88,.98,.998], volatile: [.35,.56,.79,.95]
+  } : age <= 24 ? {
+    rapid: [.20,.56,.88,.99], steady: [.33,.72,.96,.995], late: [.22,.55,.89,.985], plateau: [.63,.91,.99,.998], volatile: [.45,.68,.90,.99]
+  } : age <= 27 ? {
+    rapid: [.42,.95,.995,.999], steady: [.58,.98,.998,.999], late: [.36,.92,.99,.998], plateau: [.78,.995,.999,.9995], volatile: [.55,.93,.985,.998]
+  } : age <= 30 ? null : age <= 32 ? null : null;
+  if (bands) {
+    const t = bands[type];
+    return roll < t[0] ? 0 : roll < t[1] ? 1 : roll < t[2] ? 2 : roll < t[3] ? 3 : 4;
+  }
+  if (age <= 30) {
+    const thresholds = { rapid:[.76,.94], steady:[.82,.97], late:[.78,.95], plateau:[.90,.985], volatile:[.68,.90] }[type];
+    return roll < thresholds[0] ? 0 : roll < thresholds[1] ? -1 : 1;
+  }
+  if (age <= 32) {
+    const thresholds = { rapid:[.28,.84], steady:[.20,.79], late:[.26,.82], plateau:[.10,.63], volatile:[.16,.70] }[type];
+    return roll < thresholds[0] ? 0 : roll < thresholds[1] ? -1 : -2;
+  }
+  const thresholds = { rapid:[.22,.67,.93], steady:[.16,.58,.88], late:[.20,.63,.90], plateau:[.06,.40,.76], volatile:[.12,.50,.82] }[type];
+  return roll < thresholds[0] ? 0 : roll < thresholds[1] ? -1 : roll < thresholds[2] ? -2 : -3;
+}
 function evolvePlayer(p, random = Math.random) {
   p.previousOVR = p.ovr;
   p.age++;
-  const r = random();
-  let change;
-  if (p.age <= 20) change = r < .15 ? 0 : r < .45 ? 1 : r < .8 ? 2 : 3;
-  else if (p.age <= 24) change = r < .25 ? 0 : r < .7 ? 1 : r < .95 ? 2 : 3;
-  else if (p.age <= 28) change = r < .7 ? 0 : 1;
-  else if (p.age <= 31) change = r < .55 ? 0 : -1;
-  else change = r < .15 ? 0 : r < .55 ? -1 : r < .9 ? -2 : -3;
+  const room = p.pot - p.ovr;
+  let roll = random();
+  if (p.age <= 27) {
+    roll = Math.max(0, Math.min(1, roll + Math.min(.10, room * .01) - (room <= 2 ? .12 : 0)));
+  }
+  const change = evolveChange(p.age, growthType(p), roll);
   p.ovr = Math.max(1, Math.min(p.pot, p.ovr + change));
   p.marketValue = marketValue(p.age, p.position, p.ovr, p.pot);
   p.transferFee = Math.round(p.marketValue * 1.15 / 50000) * 50000;

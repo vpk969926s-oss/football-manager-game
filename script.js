@@ -143,6 +143,40 @@ function generatedPlayer(id, number, position, strength, nameIndex) {
   player.wage = calculateWage(player);
   return player;
 }
+function newcomerAge() {
+  const roll = Math.random();
+  return roll < .20 ? 17 : roll < .55 ? 18 : roll < .85 ? 19 : 20;
+}
+function newcomerOVR() {
+  const roll = Math.random();
+  if (roll < .04) return 69 + Math.floor(Math.random() * 5);
+  if (roll < .22) return 64 + Math.floor(Math.random() * 5);
+  return 45 + Math.floor(Math.random() * 19);
+}
+function newcomerPotential(ovr) {
+  const roll = Math.random();
+  if (roll < .008) return 90 + Math.floor(Math.random() * 4);
+  if (roll < .05) return 85 + Math.floor(Math.random() * 5);
+  if (roll < .18) return 80 + Math.floor(Math.random() * 5);
+  if (roll < .58) return 70 + Math.floor(Math.random() * 10);
+  return Math.max(ovr, 60 + Math.floor(Math.random() * 10));
+}
+function generateSeasonNewcomers() {
+  const count = 28 + Math.floor(Math.random() * 8);
+  const positions = [...POSITIONS, ...POSITIONS];
+  while (positions.length < count) positions.push(POSITIONS[Math.floor(Math.random() * POSITIONS.length)]);
+  positions.sort(() => Math.random() - .5);
+  for (let i = 0; i < count; i++) {
+    const n = gameState.nextPlayerId++;
+    const age = newcomerAge(), ovr = newcomerOVR();
+    const p = generatedPlayer('youth-' + n, String(n % 99 + 1), positions[i], 64, 1000 + n);
+    p.age = age; p.ovr = ovr; p.pot = Math.max(ovr, newcomerPotential(ovr)); p.previousOVR = ovr;
+    p.marketValue = marketValue(p.age, p.position, p.ovr, p.pot);
+    p.transferFee = Math.round(p.marketValue * 1.15 / 50000) * 50000;
+    p.wage = calculateWage(p); p.contractYears = 0;
+    gameState.freeAgents.push(p);
+  }
+}
 function initialCpuPositions(size) {
   const positions = ['GK','GK','RB','RB','CB','CB','CB','CB','LB','LB','DM','DM','CM','CM','CM','AM','RW','RW','LW','LW','CF','CF'];
   const extras = ['GK','RB','CB','LB','DM','CM','AM','RW','LW','CF'];
@@ -622,6 +656,7 @@ function startNextSeason(random = Math.random) {
   gameState.standings = emptyStandings(); gameState.results = [];
   gameState.seasonComplete = false; gameState.transferWindowState = 'summer';
   gameState.endOfSeasonRoster = [];
+  generateSeasonNewcomers();
   replenishCPU();
   generateIncomingOffers();
   ui.activeSlot = null; ui.reportSeason = gameState.season;

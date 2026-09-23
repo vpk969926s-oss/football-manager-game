@@ -127,6 +127,10 @@
           </div>
           <button class="secondary-button" data-screen="transfer" type="button"> 移籍市場を開く</button>
           <p>カードでスタメン選択・解除。売却後も15人以上必要です。</p>
+          <label class="sort-label">並び順 <select id="squad-sort">
+            <option value="default">標準</option>
+            <option value="position">ポジション順</option>
+          </select></label>
           <div id="player-list" class="player-list"></div>
         </section>
 
@@ -146,6 +150,10 @@
             <div id="pitch" class="pitch" aria-label="4-3-3 formation pitch"></div>
           </div>
           <div class="bench-heading"><div><p class="eyebrow">控え選手</p><h3>タップで入れ替え</h3></div><span id="tactics-hint">ピッチの枠、控えの順にタップ</span></div>
+          <label class="sort-label">控えの並び順 <select id="bench-sort">
+            <option value="default">標準</option>
+            <option value="position">ポジション順</option>
+          </select></label>
           <div id="bench-list" class="bench-list"></div>
         </section>
         <section id="transfer-screen" class="screen" aria-labelledby="screen-title" hidden>

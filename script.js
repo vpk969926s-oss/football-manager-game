@@ -58,6 +58,15 @@ function ensureClubProfile(s) {
   s.clubProfile = normalizeClubProfile(s.clubProfile) || normalizeClubProfile(DEFAULT_CLUB_PROFILE);
 }
 const ui = { screen: 'dashboard', squadFilter: 'all', transferFilter: 'all', sort: 'ovr', activeSlot: null, market: 'clubs', search: '', developmentSort: 'gain', reportSeason: null };
+// Display preferences only: never serialized into gameState.
+ui.squadSort = 'default';
+ui.benchSort = 'default';
+function sortPlayersForDisplay(players, order) {
+  const displayed = [...players];
+  if (order !== 'position') return displayed;
+  const rank = {GK:0,RB:1,RWB:1,CB:2,LB:3,LWB:3,DM:4,DMF:4,CM:5,CMF:5,AM:6,AMF:6,RW:7,LW:8,CF:9,ST:9};
+  return displayed.sort((a,b) => (rank[a.position] ?? 10) - (rank[b.position] ?? 10) || b.ovr - a.ovr);
+}
 let confirmation = null;
 let noticeTimer;
 
@@ -880,7 +889,7 @@ function renderDashboard() {
 function renderPlayers() {
   $('#starting-count').textContent = 'スタメン ' + gameState.selectedStartingXI.length + '/11';
   document.querySelectorAll('[data-filter]').forEach(b => { b.classList.toggle('active', b.dataset.filter === ui.squadFilter); b.setAttribute('aria-pressed', b.dataset.filter === ui.squadFilter); });
-  $('#player-list').innerHTML = squad().filter(p => ui.squadFilter === 'all' || (p.position === ui.squadFilter || positionGroup(p.position) === ui.squadFilter)).map(p => {
+  $('#player-list').innerHTML = sortPlayersForDisplay(squad().filter(p => ui.squadFilter === 'all' || (p.position === ui.squadFilter || positionGroup(p.position) === ui.squadFilter)), ui.squadSort).map(p => {
     const on = gameState.selectedStartingXI.includes(p.id);
     return `<article class="squad-player"><button class="player-card ${on ? 'is-starting' : ''}" data-player-id="${p.id}" aria-pressed="${on}" type="button"><span class="player-number">${on ? '✓' : p.number}</span><span><span class="player-name">${escapeHTML(p.name)}</span><span class="player-meta">${p.position} · ${p.age}歳 · 疲労 ${p.fatigue}%</span></span><span class="ovr"><strong>${p.ovr}</strong><span>OVR / POT ${p.pot}</span></span></button><div class="contract-meta">${p.contractYears}年 · 週給 ${money(p.wage)} /週${p.contractYears === 1 ? ' · 今季満了' : ''}</div><div class="player-sale"><span>市場価値 <b>${money(p.marketValue)}</b></span><button class="sell-button" data-renew="${p.id}" type="button">契約更新</button><button class="sell-button" data-sell="${p.id}" type="button" ${transferWindow().open ? '' : 'disabled'}>売却</button></div></article>`;
   }).join('');
@@ -891,7 +900,7 @@ function renderTactics() {
     const p = playerById(gameState.lineup[i]);
     return `<button class="pitch-slot ${p ? '' : 'empty'} ${ui.activeSlot === i ? 'active' : ''}" data-slot-index="${i}" type="button" aria-pressed="${ui.activeSlot === i}" aria-label="${SLOTS[i]} ${p ? escapeHTML(p.name) : '空き'}"><span class="slot-position">${SLOTS[i]}</span><strong>${p ? escapeHTML(p.name) : '＋'}</strong>${p ? '<span>' + p.position + ' · ' + p.ovr + '</span>' : ''}</button>`;
   }).join('') + '</div>').join('');
-  $('#bench-list').innerHTML = squad().filter(p => !gameState.selectedStartingXI.includes(p.id)).map(p =>
+  $('#bench-list').innerHTML = sortPlayersForDisplay(squad().filter(p => !gameState.selectedStartingXI.includes(p.id)), ui.benchSort).map(p =>
     `<button class="bench-player" data-bench-id="${p.id}" type="button"><span><strong>${escapeHTML(p.name)}</strong><span>${p.position} · ${p.age}歳</span></span><span class="bench-ovr">${p.ovr}</span></button>`).join('');
   const counts = POSITIONS.map(pos => pos + ' ' + selected().filter(p => p.position === pos).length).join(' / ');
   $('#formation-alert').textContent = validFormation() ? '4-3-3のポジション条件を満たしています。' : '必要: GK / LB・CB・CB・RB / DM・CM・CM / LW・CF・RW。現在: ' + counts + '。配置も確認してください。';
@@ -1065,6 +1074,8 @@ $('#development-sort').addEventListener('change', e => { ui.developmentSort = e.
 $('#development-season').addEventListener('change', e => { ui.reportSeason = Number(e.target.value); renderDevelopment(); });
 $('#start-next-season').addEventListener('click', () => startNextSeason());
 $('#transfer-sort').addEventListener('change', e => { ui.sort = e.target.value; renderTransfer(); });
+$('#squad-sort').addEventListener('change', e => { ui.squadSort = e.target.value; renderPlayers(); });
+$('#bench-sort').addEventListener('change', e => { ui.benchSort = e.target.value; renderTactics(); });
 $('#play-match').addEventListener('click', playMatch);
 $('#next-match').addEventListener('click', nextMatchday);
 $('#reset-save').addEventListener('click', () => askConfirmation('新規ゲーム・セーブ初期化', 'リーグ進行、選手売買、編成をすべて初期化します。クラブ作成画面に戻り、資金は€100,000,000から再開します。この操作は元に戻せません。', resetGame));

@@ -22,7 +22,7 @@ let app = boot();
 app.run(`
 assert.equal(gameState.clubFunds, 100000000);
 assert.equal(squad().length, 20);
-assert.equal($('#club-funds').textContent, '€100,000,000');
+assert.equal($('#club-funds').textContent, '€1億');
 assert.equal(clubs.filter(c => c.cpu).length, 9);
 assert.ok(clubs.every(c => gameState.squads[c.id].length === 20));
 assert.ok(marketValue(21,'FWD',80) > marketValue(31,'FWD',80));
@@ -318,3 +318,90 @@ assert.ok(squad().every(p=>p.pot>=p.ovr && p.contractYears>=1 && p.wage>0));
 assert.equal(transferWindow().phase,'summer');
 `);
 console.log('PASS stage 5: summer/winter boundaries, guarded transfers, contracts/signings, expiry/retirement, age and POT bounds, full development report and all sorts, migration, reload, and seasons 1–5.');
+
+// Stage 5.1: Money formatting, Starting XI Auto-Pick, Goal Events & Match Experience
+app.run(`
+resetGame();
+// 1. Money formatting
+assert.equal(formatMoney(100000000), '€1億');
+assert.equal(formatMoney(120000000), '€1億2000万');
+assert.equal(formatMoney(25000000), '€2500万');
+assert.equal(formatMoney(8500000), '€850万');
+assert.equal(formatMoney(1000000), '€100万');
+assert.equal(formatMoney(500000), '€50万');
+assert.equal(formatMoney(95000), '€9万5000');
+assert.equal(formatMoney(0), '€0');
+assert.equal(typeof gameState.clubFunds, 'number');
+assert.equal(gameState.clubFunds, 100000000);
+
+// 2. Starting XI Auto-Pick and Clear XI
+assert.equal(gameState.selectedStartingXI.length, 0);
+autoPickBestXI();
+assert.equal(gameState.selectedStartingXI.length, 11);
+assert.equal(new Set(gameState.selectedStartingXI).size, 11);
+assert.ok(validFormation());
+// Verify highest OVR for GK
+const gkOvr = playerById(gameState.lineup[0]).ovr;
+const bestGkOvr = Math.max(...squad().filter(p => p.position === 'GK').map(p => p.ovr));
+assert.equal(gkOvr, bestGkOvr);
+// Manual toggle after auto-pick
+const removedId = gameState.selectedStartingXI[0];
+togglePlayer(removedId);
+assert.equal(gameState.selectedStartingXI.length, 10);
+assert.ok(!validFormation());
+// Auto-pick restores valid 11
+autoPickBestXI();
+assert.equal(gameState.selectedStartingXI.length, 11);
+assert.ok(validFormation());
+// Clear XI works
+clearStartingXI();
+assert.equal(gameState.selectedStartingXI.length, 0);
+assert.ok(!validFormation());
+autoPickBestXI();
+saveGame();
+`);
+const before51Reload = app.run('JSON.stringify(gameState)');
+app = boot();
+assert.equal(app.run('JSON.stringify(gameState)'), before51Reload);
+
+app.run(`
+assert.equal(gameState.selectedStartingXI.length, 11);
+assert.ok(validFormation());
+closeTransferWindow();
+assert.equal(transferWindow().open, false);
+playMatch();
+assert.equal(gameState.results.length, 5);
+// Verify goal events match scores
+for (const m of gameState.fixtures[0]) {
+  assert.equal(m.homeGoals.length, m.homeScore);
+  assert.equal(m.awayGoals.length, m.awayScore);
+  for (const g of [...m.homeGoals, ...m.awayGoals]) {
+    assert.ok(Number.isInteger(g.minute) && g.minute >= 1 && g.minute <= 90);
+    assert.ok(typeof g.playerId === 'string' && g.playerId.length > 0);
+    assert.ok(typeof g.playerName === 'string' && g.playerName.length > 0);
+  }
+  for (let i = 1; i < m.homeGoals.length; i++) {
+    assert.ok(m.homeGoals[i].minute >= m.homeGoals[i-1].minute);
+  }
+  for (let i = 1; i < m.awayGoals.length; i++) {
+    assert.ok(m.awayGoals[i].minute >= m.awayGoals[i-1].minute);
+  }
+}
+const currentMatch = currentFixture();
+assert.ok(currentMatch.played);
+assert.equal(currentMatch.homeGoals.length, currentMatch.homeScore);
+assert.equal(currentMatch.awayGoals.length, currentMatch.awayScore);
+saveGame();
+`);
+const matchSave = app.run('JSON.stringify(gameState)');
+app = boot();
+assert.equal(app.run('JSON.stringify(gameState)'), matchSave);
+app.run(`
+const mReloaded = currentFixture();
+assert.ok(mReloaded.played);
+assert.equal(mReloaded.homeGoals.length, mReloaded.homeScore);
+assert.equal(mReloaded.awayGoals.length, mReloaded.awayScore);
+nextMatchday();
+assert.equal(gameState.currentMatchday, 2);
+`);
+console.log('PASS Stage 5.1: Japanese currency formatting, Auto Pick Best XI, Clear XI, exact Goal Events with minutes, persistent scorers on reload, and clean matchday progression.');

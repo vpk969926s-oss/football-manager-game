@@ -13,7 +13,21 @@ const LEAGUE = { matchdays: (clubs.length - 1) * 2, winterAfter: clubs.length - 
 const POSITIONS = ['GK', 'DEF', 'MID', 'FWD'];
 const SLOTS = ['GK', ...Array(4).fill('DEF'), ...Array(3).fill('MID'), ...Array(3).fill('FWD')];
 const $ = (selector) => document.querySelector(selector);
-const money = (value) => '€' + new Intl.NumberFormat('en-US').format(value);
+function formatMoney(value) {
+  const num = Math.round(Number(value) || 0);
+  if (num === 0) return '€0';
+  const sign = num < 0 ? '-' : '';
+  const abs = Math.abs(num);
+  const oku = Math.floor(abs / 100000000);
+  const man = Math.floor((abs % 100000000) / 10000);
+  const rest = abs % 10000;
+  let str = '';
+  if (oku > 0) str += oku + '億';
+  if (man > 0) str += man + '万';
+  if (rest > 0) str += rest;
+  return sign + '€' + str;
+}
+const money = formatMoney;
 const escapeHTML = (value) => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clubById = (id) => clubs.find(c => c.id === id);
 const ui = { screen: 'dashboard', squadFilter: 'all', transferFilter: 'all', sort: 'ovr', activeSlot: null, market: 'clubs', search: '', developmentSort: 'gain', reportSeason: null };
@@ -121,6 +135,10 @@ function validateSave(s) {
       if (m.id !== e.id || m.home !== e.home || m.away !== e.away || typeof m.played !== 'boolean' ||
           (m.played && (!Number.isInteger(m.homeScore) || !Number.isInteger(m.awayScore) || m.homeScore < 0 || m.awayScore < 0 || m.homeScore > 8 || m.awayScore > 8)) ||
           (day < s.currentMatchday - 1 && !m.played) || (day >= s.currentMatchday && m.played)) throw Error('Invalid result');
+      if (m.played) {
+        m.homeGoals = Array.isArray(m.homeGoals) ? m.homeGoals : [];
+        m.awayGoals = Array.isArray(m.awayGoals) ? m.awayGoals : [];
+      }
     });
   });
   if (s.seasonComplete !== s.fixtures[LEAGUE.matchdays - 1][0].played) throw Error('Invalid completion');
@@ -186,6 +204,14 @@ function migrateSave(s) {
     p.contractYears ??= s.freeAgents.includes(p) ? 0 : 1 + hashId(p.id) % 5;
     p.wage ??= calculateWage(p);
   }
+  s.fixtures?.forEach(round => {
+    round?.forEach(m => {
+      if (m.played) {
+        m.homeGoals = Array.isArray(m.homeGoals) ? m.homeGoals : [];
+        m.awayGoals = Array.isArray(m.awayGoals) ? m.awayGoals : [];
+      }
+    });
+  });
   if (s.version === 4) ensureFreeAgentPool(s);
   s.version = VERSION;
   return s;
@@ -227,7 +253,7 @@ function requestContract(id, mode) {
     });
   $('#contract-options').hidden = false;
   $('#contract-years').value = '3';
-  $('#contract-wage').textContent = '新しい週給: ' + money(calculateWage(p)) + ' / 週';
+  $('#contract-wage').textContent = '新しい週給: ' + money(calculateWage(p)) + ' /週';
 }
 function renewContract(id, years) {
   const p = playerById(id);
@@ -443,6 +469,40 @@ function assignBenchPlayer(id) {
   ui.activeSlot = null;
   commit();
 }
+function autoPickBestXI() {
+  const all = [...squad()].sort((a,b) => b.ovr - a.ovr);
+  const picked = [];
+  const pickedIds = new Set();
+  const take = (pos, count) => {
+    const available = all.filter(p => p.position === pos && !pickedIds.has(p.id));
+    for (let i = 0; i < count && i < available.length; i++) {
+      picked.push(available[i]);
+      pickedIds.add(available[i].id);
+    }
+  };
+  take('GK', 1);
+  take('DEF', 4);
+  take('MID', 3);
+  take('FWD', 3);
+  if (picked.length < 11) {
+    const remaining = all.filter(p => !pickedIds.has(p.id));
+    for (const p of remaining) {
+      if (picked.length >= 11) break;
+      picked.push(p);
+      pickedIds.add(p.id);
+    }
+  }
+  gameState.selectedStartingXI = picked.map(p => p.id);
+  syncLineup();
+  ui.activeSlot = null;
+  commit('4-3-3のBest XIを自動選出しました。');
+}
+function clearStartingXI() {
+  gameState.selectedStartingXI = [];
+  gameState.lineup = Array(11).fill(null);
+  ui.activeSlot = null;
+  commit('Starting XIをクリアしました。');
+}
 function buyPlayer(id, years = 3) {
   if (!transferWindow().open) return notify('TRANSFER WINDOW CLOSED');
   if (!validYears(years)) return notify('契約年数は1〜5年です。');
@@ -524,20 +584,57 @@ function simulateScore(home, away) {
   };
   return [poisson(expected(hp,ap,.2)), poisson(expected(ap,hp,0))];
 }
+function pickScorer(pool) {
+  const posWeights = { FWD: 10, MID: 4, DEF: 1, GK: 0.05 };
+  const weights = pool.map(p => {
+    const pw = posWeights[p.position] || 1;
+    const ow = Math.max(0.5, (p.ovr - 40) / 10);
+    return pw * ow;
+  });
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < pool.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return pool[i];
+  }
+  return pool[0];
+}
+function generateGoalEvents(clubId, goalCount) {
+  if (goalCount <= 0) return [];
+  const pool = clubId === USER ? (selected().length === 11 ? selected() : squad()) : (gameState.squads[clubId] || []);
+  if (!pool.length) return [];
+  const events = [];
+  for (let i = 0; i < goalCount; i++) {
+    const scorer = pickScorer(pool);
+    const minute = Math.floor(Math.random() * 90) + 1;
+    events.push({ minute, playerId: scorer.id, playerName: scorer.name });
+  }
+  return events.sort((a, b) => a.minute - b.minute);
+}
 function playMatch() {
   if (gameState.seasonComplete || currentFixture().played) return;
   if (transferWindow().open) return notify('先に Start Season / Continue Season で移籍期間を終了してください。');
   if (!validFormation()) return notify('GK 1 / DEF 4 / MID 3 / FWD 3で11人を編成してください。');
   gameState.fixtures[gameState.currentMatchday - 1].forEach(m => {
-    [m.homeScore, m.awayScore] = simulateScore(m.home, m.away); m.played = true;
-    applyResult(gameState.standings,m);
+    [m.homeScore, m.awayScore] = simulateScore(m.home, m.away);
+    m.played = true;
+    m.homeGoals = generateGoalEvents(m.home, m.homeScore);
+    m.awayGoals = generateGoalEvents(m.away, m.awayScore);
+    applyResult(gameState.standings, m);
     gameState.results.push({ ...m, matchday: gameState.currentMatchday, season: gameState.season });
   });
   gameState.seasonComplete = gameState.currentMatchday === LEAGUE.matchdays;
   if (gameState.currentMatchday === LEAGUE.winterAfter) gameState.transferWindowState = 'winter';
   if (gameState.seasonComplete) finishSeason();
   commit();
-  if (gameState.seasonComplete) switchScreen('season');
+  if (gameState.seasonComplete) {
+    switchScreen('season');
+  } else {
+    const ftCard = $('#match-fulltime-card');
+    if (ftCard) {
+      try { ftCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch {}
+    }
+  }
 }
 function nextMatchday() {
   if (!currentFixture().played || gameState.currentMatchday >= LEAGUE.matchdays || transferWindow().open) return;
@@ -558,7 +655,15 @@ function renderDashboard() {
   const next = gameState.fixtures.flat().find(m => !m.played && (m.home === USER || m.away === USER));
   $('#dashboard-opponent').textContent = next ? (next.home === USER ? 'Home · ' : 'Away · ') + clubById(next.home === USER ? next.away : next.home).name : 'Season complete';
   const last = gameState.results.filter(m => m.home === USER || m.away === USER).at(-1);
-  $('#dashboard-last-result').textContent = last ? '直近: ' + clubById(last.home).short + ' ' + last.homeScore + ' – ' + last.awayScore + ' ' + clubById(last.away).short + ' · ' + outcome(last) : 'まだ試合はありません。';
+  if (last) {
+    const hCl = clubById(last.home), aCl = clubById(last.away);
+    const hGoals = (last.homeGoals || []).map(g => g.minute + "' " + g.playerName).join(', ');
+    const aGoals = (last.awayGoals || []).map(g => g.minute + "' " + g.playerName).join(', ');
+    const scorerSummary = (hGoals || aGoals) ? ' (' + (hGoals || '—') + ' / ' + (aGoals || '—') + ')' : '';
+    $('#dashboard-last-result').textContent = '直近: ' + hCl.short + ' ' + last.homeScore + ' – ' + last.awayScore + ' ' + aCl.short + ' · ' + outcome(last) + scorerSummary;
+  } else {
+    $('#dashboard-last-result').textContent = 'まだ試合はありません。';
+  }
   $('#dashboard-record').textContent = stats.wins + ' - ' + stats.draws + ' - ' + stats.losses;
   $('#club-funds').textContent = money(gameState.clubFunds);
   $('#squad-size').textContent = squad().length + '人';
@@ -570,7 +675,7 @@ function renderPlayers() {
   document.querySelectorAll('[data-filter]').forEach(b => { b.classList.toggle('active', b.dataset.filter === ui.squadFilter); b.setAttribute('aria-pressed', b.dataset.filter === ui.squadFilter); });
   $('#player-list').innerHTML = squad().filter(p => ui.squadFilter === 'all' || p.position === ui.squadFilter).map(p => {
     const on = gameState.selectedStartingXI.includes(p.id);
-    return `<article class="squad-player"><button class="player-card ${on ? 'is-starting' : ''}" data-player-id="${p.id}" aria-pressed="${on}" type="button"><span class="player-number">${on ? '✓' : p.number}</span><span><span class="player-name">${escapeHTML(p.name)}</span><span class="player-meta">${p.position} · ${p.age}歳</span></span><span class="ovr"><strong>${p.ovr}</strong><span>OVR / POT ${p.pot}</span></span></button><div class="contract-meta">${p.contractYears}年 · 週給 ${money(p.wage)}${p.contractYears === 1 ? ' · 今季満了' : ''}</div><div class="player-sale"><span>市場価値 <b>${money(p.marketValue)}</b></span><button class="sell-button" data-renew="${p.id}" type="button">契約更新</button><button class="sell-button" data-sell="${p.id}" type="button" ${transferWindow().open ? '' : 'disabled'}>売却</button></div></article>`;
+    return `<article class="squad-player"><button class="player-card ${on ? 'is-starting' : ''}" data-player-id="${p.id}" aria-pressed="${on}" type="button"><span class="player-number">${on ? '✓' : p.number}</span><span><span class="player-name">${escapeHTML(p.name)}</span><span class="player-meta">${p.position} · ${p.age}歳</span></span><span class="ovr"><strong>${p.ovr}</strong><span>OVR / POT ${p.pot}</span></span></button><div class="contract-meta">${p.contractYears}年 · 週給 ${money(p.wage)} /週${p.contractYears === 1 ? ' · 今季満了' : ''}</div><div class="player-sale"><span>市場価値 <b>${money(p.marketValue)}</b></span><button class="sell-button" data-renew="${p.id}" type="button">契約更新</button><button class="sell-button" data-sell="${p.id}" type="button" ${transferWindow().open ? '' : 'disabled'}>売却</button></div></article>`;
   }).join('');
 }
 function renderTactics() {
@@ -599,7 +704,7 @@ function renderTransfer() {
       (p.name + ' ' + p.club.name).toLowerCase().includes(ui.search.toLowerCase()))
     .sort((a,b) => ui.sort === 'price' ? a.transferFee - b.transferFee : ui.sort === 'price-desc' ? b.transferFee - a.transferFee : b.ovr - a.ovr);
   $('#transfer-count').textContent = list.length + '人 · ' + (ui.market === 'free' ? '移籍金0・給与契約が必要' : '所属クラブにも最低15人を残します');
-  $('#transfer-list').innerHTML = list.map(p => `<article class="transfer-card" data-transfer-player="${p.id}"><div class="transfer-heading"><div><h3>${escapeHTML(p.name)}</h3><p>${p.position} · ${p.age}歳 · ${escapeHTML(p.club.name)}</p></div><strong class="rating">${p.ovr}<small>OVR</small><small>POT ${p.pot}</small></strong></div><dl><div><dt>市場価値</dt><dd>${money(p.marketValue)}</dd></div><div><dt>移籍金</dt><dd>${money(p.transferFee)}</dd></div><div><dt>契約 / 現週給</dt><dd>${p.contractYears}年 / ${money(p.wage)}</dd></div></dl><button data-${ui.market === 'free' ? 'sign' : 'buy'}="${p.id}" class="primary-button" type="button" ${windowStatus.open ? '' : 'disabled'}>${!windowStatus.open ? 'TRANSFER WINDOW CLOSED' : ui.market === 'free' ? 'Sign · 契約する' : gameState.squads[p.club.id].length <= 15 ? '所属クラブの最低人数' : gameState.clubFunds < p.transferFee ? '資金不足' : '購入 · ' + money(p.transferFee)}</button></article>`).join('') || '<p>該当する選手はいません。</p>';
+  $('#transfer-list').innerHTML = list.map(p => `<article class="transfer-card" data-transfer-player="${p.id}"><div class="transfer-heading"><div><h3>${escapeHTML(p.name)}</h3><p>${p.position} · ${p.age}歳 · ${escapeHTML(p.club.name)}</p></div><strong class="rating">${p.ovr}<small>OVR</small><small>POT ${p.pot}</small></strong></div><dl><div><dt>市場価値</dt><dd>${money(p.marketValue)}</dd></div><div><dt>移籍金</dt><dd>${money(p.transferFee)}</dd></div><div><dt>契約 / 現週給</dt><dd>${p.contractYears}年 / ${money(p.wage)} /週</dd></div></dl><button data-${ui.market === 'free' ? 'sign' : 'buy'}="${p.id}" class="primary-button" type="button" ${windowStatus.open ? '' : 'disabled'}>${!windowStatus.open ? 'TRANSFER WINDOW CLOSED' : ui.market === 'free' ? 'Sign · 契約する' : gameState.squads[p.club.id].length <= 15 ? '所属クラブの最低人数' : gameState.clubFunds < p.transferFee ? '資金不足' : '購入 · ' + money(p.transferFee)}</button></article>`).join('') || '<p>該当する選手はいません。</p>';
 }
 function renderTable() {
   $('#standings-body').innerHTML = sortedStandings().map((s,i) => `<tr class="${s.clubId === USER ? 'user-row' : ''}"><td>${i+1}</td><td><strong>${clubById(s.clubId).short}</strong> ${clubById(s.clubId).name}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.goalDifference}</td><td><b>${s.points}</b></td></tr>`).join('');
@@ -619,8 +724,93 @@ function renderMatch() {
   $('#play-match').textContent = m.played ? 'Match Played' : validFormation() ? 'Play Match' : 'Starting XIを編成してください';
   $('#match-message').textContent = gameState.seasonComplete ? 'シーズン終了。Tableで最終順位を確認できます。' : m.played ? 'この節は終了しました。' : '4-3-3の11人を編成して試合を開始。';
   $('#next-match').hidden = !m.played || gameState.seasonComplete || transferWindow().open;
-  $('#last-result-card').hidden = !m.played;
-  $('#last-result-card').innerHTML = m.played ? `<p class="eyebrow">FULL TIME · MATCHDAY ${gameState.currentMatchday}</p><h2>${clubById(m.home).name} ${m.homeScore} — ${m.awayScore} ${clubById(m.away).name}</h2><strong>${outcome(m)}</strong><ul>${gameState.fixtures[gameState.currentMatchday - 1].filter(f => f.id !== m.id).map(f => '<li>' + clubById(f.home).short + ' ' + f.homeScore + ' – ' + f.awayScore + ' ' + clubById(f.away).short + '</li>').join('')}</ul>` : '';
+
+  const previewCard = $('#match-card');
+  const ftCard = $('#match-fulltime-card');
+
+  if (!m.played) {
+    if (previewCard) previewCard.hidden = false;
+    if (ftCard) ftCard.hidden = true;
+    $('#last-result-card').hidden = true;
+  } else {
+    if (previewCard) previewCard.hidden = true;
+    if (ftCard) {
+      ftCard.hidden = false;
+      const homeClub = clubById(m.home);
+      const awayClub = clubById(m.away);
+      const diff = m.home === USER ? m.homeScore - m.awayScore : m.awayScore - m.homeScore;
+      const outcomeText = diff > 0 ? 'WIN' : diff < 0 ? 'LOSS' : 'DRAW';
+      const outcomeClass = diff > 0 ? 'is-win' : diff < 0 ? 'is-loss' : 'is-draw';
+      ftCard.className = 'match-result-card ' + outcomeClass;
+
+      const formatScorersList = (goals) => {
+        if (!goals || !goals.length) return '<p class="scorers-none">得点なし</p>';
+        return '<ul class="scorers-list">' + goals.map(g =>
+          `<li class="scorer-item"><span class="scorer-minute">${g.minute}'</span><span class="scorer-name">${escapeHTML(g.playerName)}</span></li>`
+        ).join('') + '</ul>';
+      };
+
+      const otherFixtures = gameState.fixtures[gameState.currentMatchday - 1].filter(f => f.id !== m.id);
+      const otherMatchesHtml = otherFixtures.length ? `
+        <details class="other-matches">
+          <summary>他会場の結果（第${gameState.currentMatchday}節・4試合）▼</summary>
+          <ul class="other-matches-list">
+            ${otherFixtures.map(f => `<li>${clubById(f.home).short} ${f.homeScore} – ${f.awayScore} ${clubById(f.away).short}</li>`).join('')}
+          </ul>
+        </details>` : '';
+
+      let actionButtons = '';
+      if (gameState.seasonComplete) {
+        actionButtons = `<button class="primary-button" data-screen="season" type="button">🏆 Season Complete / シーズン結果を見る</button>`;
+      } else if (transferWindow().open) {
+        actionButtons = `
+          <button class="primary-button" data-window-continue type="button">Continue Season（冬の移籍期間終了）</button>
+          <button class="secondary-button" data-screen="transfer" type="button">⇄ Winter Transfer市場を開く</button>`;
+      } else {
+        actionButtons = `
+          <button class="primary-button" id="ft-next-match" type="button">Next Matchday (第${gameState.currentMatchday + 1}節へ) →</button>`;
+      }
+      actionButtons += `<button class="secondary-button compact" data-screen="table" type="button">📊 Table（順位表）を見る</button>`;
+
+      ftCard.innerHTML = `
+        <p class="eyebrow">MATCHDAY ${gameState.currentMatchday} · FULL TIME</p>
+        <div class="result-badge">${outcomeText}</div>
+        <div class="score-board">
+          <div class="score-team">
+            <div class="club-badge ${m.home === USER ? 'user-badge' : ''}">${homeClub.short}</div>
+            <strong>${escapeHTML(homeClub.name)}</strong>
+          </div>
+          <div class="score-display">
+            <span>${m.homeScore}</span>
+            <span class="score-divider">-</span>
+            <span>${m.awayScore}</span>
+          </div>
+          <div class="score-team">
+            <div class="club-badge ${m.away === USER ? 'user-badge' : ''}">${awayClub.short}</div>
+            <strong>${escapeHTML(awayClub.name)}</strong>
+          </div>
+        </div>
+        <div class="scorers-section">
+          <div class="scorers-heading">Scorers</div>
+          <div class="scorers-grid">
+            <div class="scorers-col">
+              <p class="eyebrow" style="margin-bottom:4px;">${escapeHTML(homeClub.short)}</p>
+              ${formatScorersList(m.homeGoals)}
+            </div>
+            <div class="scorers-col">
+              <p class="eyebrow" style="margin-bottom:4px;">${escapeHTML(awayClub.short)}</p>
+              ${formatScorersList(m.awayGoals)}
+            </div>
+          </div>
+        </div>
+        <div class="match-actions">
+          ${actionButtons}
+        </div>
+        ${otherMatchesHtml}
+      `;
+    }
+    $('#last-result-card').hidden = true;
+  }
 }
 function renderAll() {
   renderDashboard(); renderPlayers(); renderTactics(); renderMatch(); renderTable(); renderTransfer(); renderSeasons();
@@ -642,7 +832,10 @@ document.addEventListener('click', e => {
   const button = e.target.closest('button');
   if (!button) return;
   const d = button.dataset;
-  if (d.screen) switchScreen(d.screen);
+  if (button.id === 'ft-next-match') nextMatchday();
+  else if (d.action === 'auto-pick') autoPickBestXI();
+  else if (d.action === 'clear-xi') clearStartingXI();
+  else if (d.screen) switchScreen(d.screen);
   else if (d.playerId) togglePlayer(d.playerId);
   else if (d.sell) requestSell(d.sell);
   else if (d.buy) requestContract(d.buy, 'buy');

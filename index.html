@@ -82,6 +82,10 @@
 
         <section id="squad-screen" class="screen" aria-labelledby="screen-title" hidden>
           <div class="squad-intro"><div><p class="eyebrow green">FIRST TEAM</p><h2>Squad overview</h2></div><span id="starting-count" class="squad-count">STARTING XI 0/11</span></div>
+          <div class="squad-toolbar">
+            <button class="primary-button compact" data-action="auto-pick" type="button">⚡ Auto Pick Best XI</button>
+            <button class="secondary-button compact" data-action="clear-xi" type="button">Clear XI</button>
+          </div>
           <div class="squad-filters" role="group" aria-label="ポジション絞り込み">
             <button class="filter-button active" data-filter="all" type="button">All</button>
             <button class="filter-button" data-filter="GK" type="button">GK</button>
@@ -96,7 +100,8 @@
 
         <section id="match-screen" class="screen" aria-labelledby="screen-title" hidden>
           <div class="squad-intro"><div><p class="eyebrow green">MATCHDAY <span id="matchday-label">1</span> / 18</p><h2>Match centre</h2></div><span id="match-status" class="squad-count">UP NEXT</span></div>
-          <article class="match-card"><div class="match-meta"><span id="match-venue">HOME</span><span>·</span><span>REGULAR SEASON</span></div><div class="match-teams"><div><div class="club-badge user-badge">NB</div><strong>Northbridge FC</strong><span id="user-rating">OVR 72</span></div><span class="versus">VS</span><div><div id="opponent-badge" class="club-badge">—</div><strong id="match-opponent">Opponent</strong><span id="opponent-rating">OVR 70</span></div></div><button id="play-match" class="primary-button" type="button">Play Match</button><p id="match-message" class="match-message">Starting XIのチーム力を確認して試合を開始できます。</p></article>
+          <article id="match-card" class="match-card"><div class="match-meta"><span id="match-venue">HOME</span><span>·</span><span>REGULAR SEASON</span></div><div class="match-teams"><div><div class="club-badge user-badge">NB</div><strong>Northbridge FC</strong><span id="user-rating">OVR 72</span></div><span class="versus">VS</span><div><div id="opponent-badge" class="club-badge">—</div><strong id="match-opponent">Opponent</strong><span id="opponent-rating">OVR 70</span></div></div><button id="play-match" class="primary-button" type="button">Play Match</button><p id="match-message" class="match-message">Starting XIのチーム力を確認して試合を開始できます。</p></article>
+          <article id="match-fulltime-card" class="match-result-card" hidden></article>
           <div id="last-result-card" class="result-card" hidden></div>
           <p id="match-window" class="window-status"></p>
           <button class="primary-button" data-window-continue type="button">Start Season</button>
@@ -112,6 +117,10 @@
 
         <section id="tactics-screen" class="screen" aria-labelledby="screen-title" hidden>
           <div class="squad-intro"><div><p class="eyebrow green">MATCH PLAN</p><h2>Team tactics</h2></div><span class="squad-count">4-3-3</span></div>
+          <div class="tactics-toolbar">
+            <button class="primary-button compact" data-action="auto-pick" type="button">⚡ Auto Pick Best XI</button>
+            <button class="secondary-button compact" data-action="clear-xi" type="button">Clear XI</button>
+          </div>
           <div id="formation-alert" class="formation-alert" role="status"></div>
           <div class="pitch-wrap">
             <div id="pitch" class="pitch" aria-label="4-3-3 formation pitch"></div>

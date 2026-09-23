@@ -1,4 +1,12 @@
 :root { color-scheme: dark; --bg: #080b12; --surface: #111722; --surface-2: #171f2d; --line: #273143; --muted: #8791a4; --text: #f2f5fb; --green: #4ade80; --green-dim: #173b2a; --amber: #f6b94c; }
+body.is-setup .app-shell, body.is-setup .bottom-nav { display: none !important; }
+.setup-screen { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); }
+.setup-card { width: min(440px, 100%); padding: 28px 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; }
+.setup-card h1 { font-size: clamp(26px, 8vw, 34px); margin-bottom: 10px; }
+.setup-lead { color: var(--muted); font-size: 15px; line-height: 1.7; margin: 0 0 24px; }
+.setup-field { display: grid; gap: 8px; margin-bottom: 16px; font-size: 13px; color: var(--muted); }
+.setup-field input { width: 100%; min-height: 48px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #0c111b; color: var(--text); font: inherit; }
+.setup-error { color: #ffb5c1; font-size: 13px; line-height: 1.6; margin: 0 0 14px; }
 .season-panel { margin: 16px 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); line-height: 1.7; overflow-wrap: anywhere; }
 .window-status { color: var(--amber); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; padding: 12px 0; }
 .contract-meta { padding: 12px; color: #b5c5dd; font-size: 13px; border-bottom: 1px solid var(--line); }
@@ -137,4 +145,18 @@ h3 { font-size: 17px; letter-spacing: -.02em; margin: 0 0 5px; }
 .other-matches { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line); text-align: left; }
 .other-matches summary { font: 600 11px "DM Mono", monospace; color: var(--muted); cursor: pointer; padding: 4px 0; }
 .other-matches-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: var(--muted); }
-
+/* Stage 6: readable matchday and management controls on narrow screens. */
+.home-match { margin: 22px 0; }
+.home-match #play-match { width: 100%; min-height: 56px; font-size: 17px; }
+.match-finance { margin-top: 20px; padding-top: 16px; border-top: 1px solid #354052; }
+.match-finance p, #finance-history p { overflow-wrap: anywhere; }
+#weekly-actions button, #pending-contracts button { margin: 6px 0; }
+#finance-summary { grid-template-columns: repeat(auto-fit,minmax(min(100%,220px),1fr)); }
+#finance-summary strong { font-size: clamp(18px,4vw,26px); overflow-wrap: anywhere; }
+.squad-filters { flex-wrap: wrap; overflow-x: visible; }
+.squad-filters button { min-width: 44px; min-height: 44px; }
+.setup-field select { width: 100%; min-height: 48px; padding: 10px; color: #eef2f8; background: #171f2e; border: 1px solid #354052; border-radius: 8px; }
+[hidden] { display: none !important; }
+.bottom-nav .nav-item { min-height: 56px; font-size: 12px; }
+.match-actions:empty { display: none; }
+#pending-contracts .season-panel { overflow-wrap: anywhere; }

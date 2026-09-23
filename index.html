@@ -6,158 +6,178 @@
     <meta name="theme-color" content="#080b12" />
     <meta name="description" content="スマートフォン向けサッカークラブ経営シミュレーション" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23111827'/%3E%3Cpath d='M32 11 47 20v18L32 47 17 38V20z' fill='none' stroke='%234ade80' stroke-width='5'/%3E%3Cpath d='m32 25 6 4v7l-6 4-6-4v-7z' fill='%234ade80'/%3E%3C/svg%3E" />
-    <title>Northbridge FC | Club Manager</title>
+    <title>クラブマネージャー</title>
     <link rel="stylesheet" href="style.css" />
     <script src="script.js" defer></script>
   </head>
-  <body>
+  <body class="is-setup">
+    <section id="setup-screen" class="setup-screen">
+      <div class="setup-card">
+        <p class="eyebrow green">イングランドリーグ</p>
+        <h1>クラブを設立</h1>
+        <p class="setup-lead">あなたのクラブを作成し、イングランドリーグからキャリアを始めます。</p>
+        <form id="club-setup-form">
+          <label class="setup-field">
+            <span>クラブ名</span>
+            <input id="club-name-input" name="clubName" type="text" maxlength="30" autocomplete="organization" required placeholder="例: Manchester Blue" />
+          </label>
+          <label class="setup-field">
+            <span>クラブ略称（2〜3文字）</span><input id="club-short-input" maxlength="3" minlength="2" required />
+          </label><label class="setup-field"><span>ホームタウン</span><select id="club-city-select"><option>London</option><option>Manchester</option><option>Liverpool</option><option>Birmingham</option><option>Leeds</option><option>Newcastle</option><option>Sheffield</option><option>Bristol</option><option value="other">その他</option></select>
+          </label><label id="custom-city-field" class="setup-field" hidden><span>ホームタウン（自由入力）</span><input id="club-city-input" maxlength="40" />
+          </label>
+          <p>国：England / イングランドリーグ<br>スタジアム：20,000席 / 初期資金：€1億</p><p id="setup-error" class="setup-error" role="alert" hidden></p>
+          <button id="start-career" class="primary-button" type="submit">クラブを作成して開始</button>
+        </form>
+      </div>
+    </section>
     <div class="app-shell">
       <aside class="sidebar" aria-label="メインナビゲーション">
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true">◆</div>
+
           <div>
-            <strong>Northbridge</strong>
-            <span>FOOTBALL CLUB</span>
+            <strong id="brand-name">Club</strong>
+            <span id="brand-city">FOOTBALL CLUB</span>
           </div>
         </div>
         <nav class="nav-list">
-          <button class="nav-item active" data-screen="dashboard" type="button"><span class="nav-icon">▦</span><span>Dashboard</span></button>
-          <button class="nav-item" data-screen="squad" type="button"><span class="nav-icon">♙</span><span>Squad</span></button>
-          <button class="nav-item" data-screen="tactics" type="button"><span class="nav-icon">⌁</span><span>Tactics</span></button>
-          <button class="nav-item" data-screen="match" type="button"><span class="nav-icon">◎</span><span>Match</span></button>
-          <button class="nav-item" data-screen="table" type="button"><span class="nav-icon">☷</span><span>Table</span></button>
+          <button class="nav-item active" data-screen="dashboard" type="button"><span>ホーム</span></button>
+          <button class="nav-item" data-screen="squad" type="button"><span>選手</span></button>
+          <button class="nav-item" data-screen="tactics" type="button"><span>戦術</span></button>
+          <button class="nav-item" data-screen="table" type="button"><span>順位表</span></button>
+<button class="nav-item" data-screen="finance" type="button">財政</button>
         </nav>
-        <button class="nav-item" data-screen="transfer" type="button">⇄ Transfer</button>
+        <button class="nav-item" data-screen="transfer" type="button"> 移籍市場</button>
         <div class="sidebar-footer"><span class="status-dot"></span> Season 01 · Pre-season</div>
       </aside>
 
       <main class="main-content">
         <header class="topbar">
           <div>
-            <p id="season-label" class="eyebrow">CLUB MANAGER / SEASON 01</p>
-            <h1 id="screen-title">Dashboard</h1>
+            <p id="season-label" class="eyebrow">クラブ経営 / シーズン1</p>
+            <h1 id="screen-title">ホーム</h1>
           </div>
-          <button class="avatar-button" type="button" aria-label="マネージャープロフィール">YU</button>
+
         </header>
 
         <section id="dashboard-screen" class="screen active-screen" aria-labelledby="screen-title">
           <div class="hero-card">
             <div class="hero-copy">
-              <p class="eyebrow green">WELCOME BACK, MANAGER</p>
-              <h2>Build your legacy.</h2>
-              <p>クラブの現在地を確認して、次の一手を決めよう。</p>
+              <p class="eyebrow green">クラブ経営</p>
+              <h2 id="hero-club-name">クラブ情報</h2>
+              <p id="hero-club-copy">クラブの現在地を確認して、次の一手を決めよう。</p>
             </div>
-            <div class="hero-crest" aria-hidden="true"><span>NB</span></div>
+            <div class="hero-crest" aria-hidden="true"><span id="hero-crest-mark">FC</span></div>
           </div>
 
-          <div class="section-heading"><div><p class="eyebrow">AT A GLANCE</p><h2>Club overview</h2></div><span class="live-pill"><i></i> LIVE</span></div>
+        <section class="home-match" aria-label="試合進行">
+          <div class="squad-intro"><div><p class="eyebrow green">第<span id="matchday-label">1</span>節 / 18</p><h2 id="match-heading">次の試合</h2></div><span id="match-status" class="squad-count">次の試合</span></div>
+          <article id="match-card" class="match-card"><div class="match-meta"><span id="match-venue">ホーム</span><span>·</span><span>リーグ戦</span></div><div class="match-teams"><div><div id="user-badge" class="club-badge user-badge">FC</div><strong id="user-club-name">自クラブ</strong><span id="user-rating">OVR 72</span></div><span class="versus">VS</span><div><div id="opponent-badge" class="club-badge">—</div><strong id="match-opponent">対戦相手</strong><span id="opponent-rating">OVR 70</span></div></div><p id="match-fatigue"></p><button id="play-match" class="primary-button" type="button">試合を行う</button><p id="match-message" class="match-message">スタメンのチーム力を確認して試合を開始できます。</p></article>
+          <article id="match-fulltime-card" class="match-result-card" hidden></article>
+          <section id="weekly-actions" class="season-panel" hidden></section><div id="last-result-card" class="result-card" hidden></div>
+          <p id="match-window" class="window-status"></p>
+          <button class="primary-button" data-window-continue type="button">シーズン開始</button>
+          <button id="match-summary" class="secondary-button" data-screen="season" type="button" hidden>シーズン結果を見る</button>
+          <button id="next-match" class="secondary-button" type="button" hidden>次節へ</button>
+          <div class="cpu-note"><span></span> CPU対戦4試合も同じ節に処理されます。</div>
+        </section>
+
+
+          <div class="section-heading"><div><p class="eyebrow">シーズン状況</p><h2>クラブ概要</h2></div><span class="live-pill"><i></i> 最新</span></div>
           <div class="stat-grid">
-            <article class="stat-card"><span class="stat-label">POSITION</span><strong id="dashboard-position">1st</strong><span class="stat-note">現在の順位</span></article>
-            <article class="stat-card"><span class="stat-label">POINTS</span><strong id="dashboard-points">0</strong><span class="stat-note">勝点</span></article>
-            <article class="stat-card"><span class="stat-label">MATCHDAY</span><strong id="dashboard-matchday">1 / 18</strong><span class="stat-note">次の試合</span></article>
+            <article class="stat-card"><span class="stat-label">順位</span><strong id="dashboard-position">1st</strong><span class="stat-note">現在の順位</span></article>
+            <article class="stat-card"><span class="stat-label">勝点</span><strong id="dashboard-points">0</strong><span class="stat-note">勝点</span></article>
+            <article class="stat-card"><span class="stat-label">節</span><strong id="dashboard-matchday">1 / 18</strong><span class="stat-note">次の試合</span></article>
           </div>
 
           <article class="next-card">
-            <div class="next-icon">✦</div>
-            <div><p class="eyebrow">UP NEXT</p><h3 id="dashboard-opponent">Matchday 1</h3><p id="dashboard-last-result">次の試合をプレイしてシーズンを進めよう。</p></div>
-            <button class="text-button" data-screen="match" type="button" aria-label="試合を開く">→</button>
+            <div class="next-icon"></div>
+            <div><p class="eyebrow">次の試合</p><h3 id="dashboard-opponent">Matchday 1</h3><p id="dashboard-last-result">次の試合をプレイしてシーズンを進めよう。</p></div>
+            <button class="text-button" data-screen="match" type="button" aria-label="試合を開く">試合</button>
           </article>
-          <div class="dashboard-form"><div><p class="eyebrow">SEASON RECORD</p><h2 id="dashboard-record">0 - 0 - 0</h2></div><span id="dashboard-form-note">W - D - L</span></div>
-          <section class="finance-panel" aria-label="クラブ資産">
-            <p class="eyebrow">CLUB FINANCES</p>
+          <div class="dashboard-form"><div><p class="eyebrow">シーズン成績</p><h2 id="dashboard-record">0 - 0 - 0</h2></div><span id="dashboard-form-note">勝 - 分 - 敗</span></div>
+          <p id="average-fatigue" class="season-panel"></p><section class="finance-panel" aria-label="クラブ資産">
+            <p class="eyebrow">クラブ資産</p>
             <p>クラブ資金 <strong id="club-funds"></strong></p>
             <p>スカッド人数 <strong id="squad-size"></strong></p>
             <p>スカッド総市場価値 <strong id="squad-value"></strong></p>
-            <button class="primary-button" data-screen="transfer" type="button">⇄ Transfer市場を開く</button>
+            <button class="primary-button" data-screen="transfer" type="button"> 移籍市場を開く</button>
           </section>
           <section class="season-panel">
             <p id="dashboard-window" class="window-status"></p>
-            <button class="primary-button" data-window-continue type="button">Start Season</button>
-            <button class="secondary-button" data-screen="season" type="button">Season History / シーズン結果</button>
-            <button class="secondary-button" data-screen="development" type="button">Player Development Report</button>
+            <button class="secondary-button" data-screen="season" type="button">シーズン履歴・結果</button>
+            <button class="secondary-button" data-screen="development" type="button">選手成長レポート</button>
           </section>
           <p id="save-status" role="status"></p>
-          <button id="reset-save" class="secondary-button" type="button">New Game / Reset Save</button>
+          <button id="reset-save" class="secondary-button" type="button">新規ゲーム・セーブ初期化</button>
         </section>
 
         <section id="squad-screen" class="screen" aria-labelledby="screen-title" hidden>
-          <div class="squad-intro"><div><p class="eyebrow green">FIRST TEAM</p><h2>Squad overview</h2></div><span id="starting-count" class="squad-count">STARTING XI 0/11</span></div>
+          <div class="squad-intro"><div><p class="eyebrow green">トップチーム</p><h2>所属選手</h2></div><span id="starting-count" class="squad-count">スタメン 0/11</span></div>
           <div class="squad-toolbar">
-            <button class="primary-button compact" data-action="auto-pick" type="button">⚡ Auto Pick Best XI</button>
-            <button class="secondary-button compact" data-action="clear-xi" type="button">Clear XI</button>
+            <button class="primary-button compact" data-action="auto-pick" type="button"> ベストメンバー自動編成</button>
+            <button class="secondary-button compact" data-action="clear-xi" type="button">スタメン解除</button>
           </div>
           <div class="squad-filters" role="group" aria-label="ポジション絞り込み">
-            <button class="filter-button active" data-filter="all" type="button">All</button>
+            <button class="filter-button active" data-filter="all" type="button">すべて</button>
             <button class="filter-button" data-filter="GK" type="button">GK</button>
-            <button class="filter-button" data-filter="DEF" type="button">DEF</button>
-            <button class="filter-button" data-filter="MID" type="button">MID</button>
-            <button class="filter-button" data-filter="FWD" type="button">FWD</button>
+            <button class="filter-button" data-filter="LB" type="button">LB</button><button class="filter-button" data-filter="CB" type="button">CB</button><button class="filter-button" data-filter="RB" type="button">RB</button>
+            <button class="filter-button" data-filter="DM" type="button">DM</button><button class="filter-button" data-filter="CM" type="button">CM</button><button class="filter-button" data-filter="AM" type="button">AM</button>
+            <button class="filter-button" data-filter="LW" type="button">LW</button><button class="filter-button" data-filter="CF" type="button">CF</button><button class="filter-button" data-filter="RW" type="button">RW</button>
           </div>
-          <button class="secondary-button" data-screen="transfer" type="button">⇄ Transfer市場を開く</button>
+          <button class="secondary-button" data-screen="transfer" type="button"> 移籍市場を開く</button>
           <p>カードでスタメン選択・解除。売却後も15人以上必要です。</p>
           <div id="player-list" class="player-list"></div>
         </section>
 
-        <section id="match-screen" class="screen" aria-labelledby="screen-title" hidden>
-          <div class="squad-intro"><div><p class="eyebrow green">MATCHDAY <span id="matchday-label">1</span> / 18</p><h2>Match centre</h2></div><span id="match-status" class="squad-count">UP NEXT</span></div>
-          <article id="match-card" class="match-card"><div class="match-meta"><span id="match-venue">HOME</span><span>·</span><span>REGULAR SEASON</span></div><div class="match-teams"><div><div class="club-badge user-badge">NB</div><strong>Northbridge FC</strong><span id="user-rating">OVR 72</span></div><span class="versus">VS</span><div><div id="opponent-badge" class="club-badge">—</div><strong id="match-opponent">Opponent</strong><span id="opponent-rating">OVR 70</span></div></div><button id="play-match" class="primary-button" type="button">Play Match</button><p id="match-message" class="match-message">Starting XIのチーム力を確認して試合を開始できます。</p></article>
-          <article id="match-fulltime-card" class="match-result-card" hidden></article>
-          <div id="last-result-card" class="result-card" hidden></div>
-          <p id="match-window" class="window-status"></p>
-          <button class="primary-button" data-window-continue type="button">Start Season</button>
-          <button id="match-summary" class="secondary-button" data-screen="season" type="button" hidden>Season Complete / 結果を見る</button>
-          <button id="next-match" class="secondary-button" type="button" hidden>Next Matchday →</button>
-          <div class="cpu-note"><span>●</span> CPU対戦4試合も同じ節に処理されます。</div>
-        </section>
-
         <section id="table-screen" class="screen" aria-labelledby="screen-title" hidden>
-          <div class="squad-intro"><div><p class="eyebrow green">LEAGUE TABLE</p><h2>Northbridge League</h2></div><span class="squad-count">10 CLUBS</span></div>
-          <div class="table-wrap"><table class="league-table"><thead><tr><th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody id="standings-body"></tbody></table></div>
+          <div class="squad-intro"><div><p class="eyebrow green">リーグ順位</p><h2>イングランドリーグ</h2></div><span class="squad-count">10クラブ</span></div>
+          <div class="table-wrap"><table class="league-table"><thead><tr><th>#</th><th>クラブ</th><th>試</th><th>勝</th><th>分</th><th>敗</th><th>差</th><th>点</th></tr></thead><tbody id="standings-body"></tbody></table></div>
         </section>
 
         <section id="tactics-screen" class="screen" aria-labelledby="screen-title" hidden>
-          <div class="squad-intro"><div><p class="eyebrow green">MATCH PLAN</p><h2>Team tactics</h2></div><span class="squad-count">4-3-3</span></div>
+          <div class="squad-intro"><div><p class="eyebrow green">試合計画</p><h2>チーム戦術</h2></div><span class="squad-count">4-3-3</span></div>
           <div class="tactics-toolbar">
-            <button class="primary-button compact" data-action="auto-pick" type="button">⚡ Auto Pick Best XI</button>
-            <button class="secondary-button compact" data-action="clear-xi" type="button">Clear XI</button>
+            <button class="primary-button compact" data-action="auto-pick" type="button"> ベストメンバー自動編成</button>
+            <button class="secondary-button compact" data-action="clear-xi" type="button">スタメン解除</button>
           </div>
           <div id="formation-alert" class="formation-alert" role="status"></div>
           <div class="pitch-wrap">
             <div id="pitch" class="pitch" aria-label="4-3-3 formation pitch"></div>
           </div>
-          <div class="bench-heading"><div><p class="eyebrow">AVAILABLE PLAYERS</p><h3>Tap to assign</h3></div><span id="tactics-hint">Tap a pitch slot, then a player</span></div>
+          <div class="bench-heading"><div><p class="eyebrow">控え選手</p><h3>タップで入れ替え</h3></div><span id="tactics-hint">ピッチの枠、控えの順にタップ</span></div>
           <div id="bench-list" class="bench-list"></div>
         </section>
         <section id="transfer-screen" class="screen" aria-labelledby="screen-title" hidden>
-          <div class="squad-intro"><div><p class="eyebrow green">TRANSFER MARKET</p><h2>移籍市場</h2></div><button class="secondary-button compact" data-screen="squad" type="button">Squadへ</button></div>
+          <div class="squad-intro"><div><p class="eyebrow green">移籍市場</p><h2>移籍市場</h2></div><button class="secondary-button compact" data-screen="squad" type="button">選手へ</button></div>
           <p>利用可能資金 <strong id="transfer-funds"></strong></p>
           <p id="transfer-window" class="window-status"></p>
           <div class="market-tabs" role="group" aria-label="市場種類">
-            <button class="filter-button active" data-market="clubs" type="button">Clubs</button>
-            <button class="filter-button" data-market="free" type="button">Free Agents</button>
+            <button class="filter-button active" data-market="clubs" type="button">クラブ所属</button>
+            <button class="filter-button" data-market="free" type="button">フリー選手</button>
           </div>
           <label class="sort-label">選手検索 <input id="transfer-search" type="search" placeholder="選手名・クラブ名" /></label>
           <div id="transfer-filters" class="squad-filters" role="group" aria-label="移籍ポジション">
-            <button class="filter-button active" data-transfer-filter="all" type="button">All</button>
+            <button class="filter-button active" data-transfer-filter="all" type="button">すべて</button>
             <button class="filter-button" data-transfer-filter="GK" type="button">GK</button>
-            <button class="filter-button" data-transfer-filter="DEF" type="button">DEF</button>
-            <button class="filter-button" data-transfer-filter="MID" type="button">MID</button>
-            <button class="filter-button" data-transfer-filter="FWD" type="button">FWD</button>
+            <button class="filter-button" data-transfer-filter="LB" type="button">LB</button><button class="filter-button" data-transfer-filter="CB" type="button">CB</button><button class="filter-button" data-transfer-filter="RB" type="button">RB</button>
+            <button class="filter-button" data-transfer-filter="DM" type="button">DM</button><button class="filter-button" data-transfer-filter="CM" type="button">CM</button><button class="filter-button" data-transfer-filter="AM" type="button">AM</button>
+            <button class="filter-button" data-transfer-filter="LW" type="button">LW</button><button class="filter-button" data-transfer-filter="CF" type="button">CF</button><button class="filter-button" data-transfer-filter="RW" type="button">RW</button>
           </div>
           <label class="sort-label">並び替え <select id="transfer-sort"><option value="ovr">OVR 高い順</option><option value="price">移籍金 安い順</option><option value="price-desc">移籍金 高い順</option></select></label>
           <p id="transfer-count"></p>
           <div id="transfer-list" class="transfer-list"></div>
         </section>
         <section id="season-screen" class="screen" aria-labelledby="screen-title" hidden>
-          <h2>Season Complete &amp; History</h2>
+          <h2>シーズン結果・履歴</h2>
           <div id="season-summary" class="season-panel"></div>
-          <button id="start-next-season" class="primary-button" type="button" hidden>Start Next Season</button>
-          <h3 class="report-heading">Season History</h3>
+          <div id="pending-contracts"></div><p id="contract-decision-hint"></p><button id="start-next-season" class="primary-button" type="button" hidden>次シーズン開始</button>
+          <h3 class="report-heading">シーズン履歴</h3>
           <div id="season-history" class="history-list"></div>
         </section>
-        <section id="development-screen" class="screen" aria-labelledby="screen-title" hidden>
-          <p class="eyebrow green">PLAYER DEVELOPMENT</p>
-          <h2>Player Development Report</h2>
+        <section id="finance-screen" class="screen" hidden><h2>クラブ財政</h2><div id="finance-summary" class="stat-grid"></div><h3>今シーズン・節ごとの収支</h3><div id="finance-history"></div></section><section id="development-screen" class="screen" aria-labelledby="screen-title" hidden>
+          <p class="eyebrow green">選手成長</p>
+          <h2>選手成長レポート</h2>
           <p>シーズン終了時の所属選手全員を記録。満了・引退選手も状況を表示します。</p>
           <label class="sort-label">シーズン <select id="development-season"></select></label>
           <label class="sort-label">並び替え <select id="development-sort">
@@ -169,11 +189,11 @@
       </main>
     </div>
     <nav class="bottom-nav" aria-label="モバイルナビゲーション">
-      <button class="nav-item active" data-screen="dashboard" type="button"><span class="nav-icon">▦</span><span>Home</span></button>
-      <button class="nav-item" data-screen="squad" type="button"><span class="nav-icon">♙</span><span>Squad</span></button>
-      <button class="nav-item" data-screen="tactics" type="button"><span class="nav-icon">⌁</span><span>Tactics</span></button>
-      <button class="nav-item" data-screen="match" type="button"><span class="nav-icon">◎</span><span>Match</span></button>
-      <button class="nav-item" data-screen="table" type="button"><span class="nav-icon">☷</span><span>Table</span></button>
+      <button class="nav-item active" data-screen="dashboard" type="button"><span>ホーム</span></button>
+      <button class="nav-item" data-screen="squad" type="button"><span>選手</span></button>
+      <button class="nav-item" data-screen="tactics" type="button"><span>戦術</span></button>
+      <button class="nav-item" data-screen="table" type="button"><span>順位表</span></button>
+<button class="nav-item" data-screen="finance" type="button">財政</button>
     </nav>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
     <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
@@ -184,7 +204,7 @@
           <option value="1">1年</option><option value="2">2年</option><option value="3" selected>3年</option><option value="4">4年</option><option value="5">5年</option>
         </select></label>
         <p id="contract-wage"></p>
-        <p class="contract-note">週給は契約条件として記録します。この段階では給与の自動支払いはありません。</p>
+        <p class="contract-note">週給の合計は毎節の試合終了時に一度だけ支払います。</p>
       </div>
       <div class="dialog-actions"><button id="confirm-cancel" class="secondary-button" type="button">キャンセル</button><button id="confirm-accept" class="primary-button" type="button">確定</button></div>
     </dialog>

@@ -8,8 +8,8 @@ const clubs = [
 'use strict';
 const USER = 'northbridge';
 const SAVE_KEY = 'northbridge.club-manager.v4';
-const VERSION = 10;
-const SAVE_VERSIONS = [4, 5, 6, 7, 8, 9, VERSION];
+const VERSION = 11;
+const SAVE_VERSIONS = [4, 5, 6, 7, 8, 9, 10, VERSION];
 const DEFAULT_CLUB_PROFILE = { name: 'Northbridge FC', shortName: 'NB', homeCity: 'England' };
 const LEAGUE = { matchdays: (clubs.length - 1) * 2, winterAfter: clubs.length - 1 };
 const POSITIONS = ['GK','RB','CB','LB','DM','CM','AM','RW','LW','CF'];
@@ -125,7 +125,8 @@ function newGame(profile) {
     freeAgents: [], nextPlayerId: 1, transferWindowState: 'summer', endOfSeasonRoster: [], retirementHistory: [],
     currentMatchday: 1, fixtures: createFixtures(), standings: emptyStandings(),
     results: [], squads, selectedStartingXI: [], selectedBench: [], lineup: Array(11).fill(null),
-    clubFunds: 100000000, transfers: [], seasonComplete: false, seasonPlayerStats: {} };
+    clubFunds: 100000000, transfers: [], seasonComplete: false, seasonPlayerStats: {},
+    recentPlayerForm: {}, transferNegotiations: {}, transferRejected: {} };
   upgradeManagement(state);
   applyClubIdentity(state);
   ensureFreeAgentPool(state);
@@ -144,6 +145,9 @@ function validateSave(s) {
       !Number.isSafeInteger(s.nextPlayerId) || s.nextPlayerId < 1 ||
       !['summer','winter','closed'].includes(s.transferWindowState)) throw Error('Invalid season');
   if (!s.seasonPlayerStats || typeof s.seasonPlayerStats !== 'object' || Array.isArray(s.seasonPlayerStats)) throw Error('Invalid player stats');
+  if (!s.recentPlayerForm || typeof s.recentPlayerForm !== 'object' || Array.isArray(s.recentPlayerForm) ||
+      !s.transferNegotiations || typeof s.transferNegotiations !== 'object' ||
+      !s.transferRejected || typeof s.transferRejected !== 'object') throw Error('Invalid transfer state');
   for (const stats of Object.values(s.seasonPlayerStats)) {
     if (!stats || !Number.isInteger(stats.appearances) || stats.appearances < 0 ||
         !Number.isInteger(stats.goals) || stats.goals < 0 || !Number.isInteger(stats.assists) || stats.assists < 0 ||
@@ -242,6 +246,9 @@ function migrateSave(s) {
   s.endOfSeasonRoster ??= [];
   s.nextPlayerId ??= 1;
   s.seasonPlayerStats ??= {};
+  s.recentPlayerForm ??= {};
+  s.transferNegotiations ??= {};
+  s.transferRejected ??= {};
   s.selectedBench ??= [];
   if (!s.transferWindowState) {
     s.transferWindowState = s.currentMatchday === 1 && !s.fixtures?.[0]?.[0]?.played ? 'summer' : 'closed';
@@ -294,12 +301,12 @@ function closeTransferWindow() {
   commit(status.phase === 'summer' ? '夏の移籍期間終了。シーズンを開始します。' : '冬の移籍期間終了。第10節へ進みます。');
   switchScreen('dashboard');
 }
-function requestContract(id, mode) {
+function requestContract(id, mode, agreedFee) {
   if (mode !== 'renew' && !transferWindow().open) return notify('移籍期間外');
   const p = mode === 'renew' ? playerById(id) : mode === 'sign' ? gameState.freeAgents.find(p => p.id === id) :
     clubs.filter(c => c.cpu).flatMap(c => gameState.squads[c.id]).find(p => p.id === id);
   if (!p) return notify('選手が見つかりません。');
-  const fee = mode === 'buy' ? p.transferFee : 0;
+  const fee = mode === 'buy' ? agreedFee : 0;
   if (fee > gameState.clubFunds) return notify('資金不足です。');
   askConfirmation(mode === 'renew' ? '契約更新' : mode === 'sign' ? 'フリー選手と契約' : '選手購入と契約',
     p.name + ' · OVR ' + p.ovr + ' / POT ' + p.pot + ' · 移籍金 ' + money(fee) + '。契約条件を確認してください。',
@@ -307,11 +314,65 @@ function requestContract(id, mode) {
       const years = Number($('#contract-years').value);
       if (mode === 'renew') renewContract(id, years);
       else if (mode === 'sign') signFreeAgent(id, years);
-      else buyPlayer(id, years);
+      else buyPlayer(id, years, fee);
     });
   $('#contract-options').hidden = false;
   $('#contract-years').value = '3';
   $('#contract-wage').textContent = '新しい週給: ' + money(calculateWage(p)) + ' /週';
+}
+function transferPlayer(id) {
+  return clubs.filter(c => c.cpu).flatMap(c => gameState.squads[c.id].map(player => ({ player, club: c }))).find(entry => entry.player.id === id);
+}
+function negotiationKey(id) { return id + ':' + gameState.season + ':' + transferWindow().phase; }
+function saleProfile(player, club) {
+  const form = recentFormSummary(player.id), squad = gameState.squads[club.id];
+  const samePosition = squad.filter(candidate => candidate.position === player.position).length;
+  const rank = [...squad].sort((a,b) => b.ovr-a.ovr).indexOf(player);
+  let score = (rank < 3 ? 3 : rank < 7 ? 1 : -1) + (player.age <= 23 && player.pot-player.ovr >= 5 ? 2 : 0) +
+    (form.averageRating >= 7.6 ? 2 : form.averageRating && form.averageRating < 6.4 ? -1 : 0) +
+    (player.contractYears <= 1 ? -2 : 0) + (samePosition <= 1 ? 2 : samePosition >= 4 ? -1 : 0);
+  const stance = score >= 5 ? 'protected' : score >= 2 ? 'reluctant' : score <= -2 ? 'eager' : 'open';
+  const base = { eager: .86, open: 1.03, reluctant: 1.23, protected: 1.48 }[stance];
+  const attack = ['CF','LW','RW','AM'].includes(player.position) ? form.ga * .025 : ['CM','DM'].includes(player.position) ? form.ga * .01 + Math.max(0, form.averageRating-6.7)*.06 : Math.max(0, form.averageRating-6.7)*.08;
+  const importance = rank < 3 ? .12 : rank > 12 ? -.06 : 0;
+  const contract = player.contractYears <= 1 ? -.12 : player.contractYears >= 4 ? .05 : 0;
+  const adjustment = ((hashId(player.id + gameState.season) % 11) - 5) / 100;
+  return { stance, demand: Math.round(Math.max(player.marketValue*.65, player.marketValue*(base + attack + importance + contract + adjustment))/50000)*50000 };
+}
+function openOfferDialog(id) {
+  const entry = transferPlayer(id); if (!entry || !transferWindow().open) return notify('移籍期間外');
+  if (gameState.transferRejected[negotiationKey(id)]) return notify('この移籍期間の交渉は決裂しています。');
+  const form = formLabel(id), current = gameState.transferNegotiations[id];
+  $('#contract-options').hidden = true; $('#offer-options').hidden = false; $('#counter-accept').hidden = !current?.counterFee;
+  $('#offer-player').textContent = entry.player.name + ' · 市場価値 ' + money(entry.player.marketValue) + ' · ' + form + ' · 資金 ' + money(gameState.clubFunds);
+  $('#offer-amount').value = current?.counterFee || entry.player.marketValue;
+  ui.offerId = id;
+  $('#confirm-title').textContent = current?.counterFee ? 'カウンターオファー' : '移籍オファー';
+  $('#confirm-accept').textContent = current?.counterFee ? '再提示する' : 'オファー送信';
+  confirmation = () => submitOffer(id, Number($('#offer-amount').value));
+  $('#confirm-dialog').showModal();
+}
+function submitOffer(id, amount) {
+  const entry = transferPlayer(id); if (!entry || !Number.isSafeInteger(amount) || amount <= 0 || amount > gameState.clubFunds) return notify('有効な移籍金を入力してください。');
+  const state = gameState.transferNegotiations[id] || { attempts: 0 }, profile = saleProfile(entry.player, entry.club);
+  state.attempts++;
+  const highBar = profile.stance === 'protected' ? 1.22 : profile.stance === 'reluctant' ? 1.12 : 1.04;
+  const signal = hashId(id + ':' + state.attempts + ':' + gameState.season) % 100;
+  if (amount >= profile.demand * highBar && (profile.stance !== 'protected' || signal > 12 || amount >= profile.demand * 1.42)) {
+    delete gameState.transferNegotiations[id]; requestContract(id, 'buy', amount); return;
+  }
+  if (state.attempts === 1 && amount >= profile.demand * .72) {
+    state.counterFee = Math.round(profile.demand * (1.08 + signal % 6 / 100) / 50000) * 50000;
+    gameState.transferNegotiations[id] = state; commit(entry.club.name + ' からカウンターオファーが届きました。'); openOfferDialog(id); return;
+  }
+  delete gameState.transferNegotiations[id]; gameState.transferRejected[negotiationKey(id)] = true;
+  commit('交渉決裂。次の移籍期間に再交渉できます。');
+}
+function acceptCounterOffer() {
+  const id = ui.offerId;
+  const state = id && gameState.transferNegotiations[id]; if (!state) return;
+  if (state.counterFee > gameState.clubFunds) return notify('資金不足です。');
+  delete gameState.transferNegotiations[id]; $('#confirm-dialog').close(); requestContract(id, 'buy', state.counterFee);
 }
 function renewContract(id, years) {
   const p = playerById(id);
@@ -646,6 +707,7 @@ function commit(message) {
 function askConfirmation(title, message, action) {
   confirmation = action;
   $('#contract-options').hidden = true;
+  $('#offer-options').hidden = true;
   $('#confirm-title').textContent = title;
   $('#confirm-message').textContent = message;
   $('#confirm-dialog').showModal();
@@ -722,7 +784,7 @@ function clearStartingXI() {
   ui.activeSlot = null;
   commit('スタメンをクリアしました。');
 }
-function buyPlayer(id, years = 3) {
+function buyPlayer(id, years = 3, agreedFee) {
   if (!transferWindow().open) return notify('移籍期間外');
   if (!validYears(years)) return notify('契約年数は1〜5年です。');
   const owner = clubs.find(c => c.cpu && gameState.squads[c.id].some(p => p.id === id));
@@ -730,8 +792,8 @@ function buyPlayer(id, years = 3) {
   const source = gameState.squads[owner.id];
   const player = source.find(p => p.id === id);
   if (source.length <= 15) return notify('所属クラブが最低人数のため購入できません。');
-  if (gameState.clubFunds < player.transferFee) return notify('資金不足です。');
-  const fee = player.transferFee;
+  const fee = agreedFee;
+  if (!Number.isSafeInteger(fee) || gameState.clubFunds < fee) return notify('資金不足です。');
   recordFinance('transfer-out', '選手獲得: ' + player.name, -fee);
   gameState.squads[owner.id] = source.filter(p => p.id !== id);
   player.contractYears = years; player.wage = calculateWage(player);
@@ -867,6 +929,20 @@ function generateGoalEvents(clubId, goalCount, poolAtMinute) {
 function playerSeasonStats(id) {
   return gameState.seasonPlayerStats[id] ||= { appearances: 0, goals: 0, assists: 0, ratingTotal: 0, ratingCount: 0 };
 }
+function addRecentForm(id, entry) {
+  const history = gameState.recentPlayerForm[id] ||= [];
+  history.push(entry);
+  if (history.length > 10) history.splice(0, history.length - 10);
+}
+function recentFormSummary(id) {
+  const history = gameState.recentPlayerForm[id] || [];
+  const total = history.reduce((sum, entry) => ({ goals: sum.goals + entry.goals, assists: sum.assists + entry.assists, rating: sum.rating + entry.rating }), { goals: 0, assists: 0, rating: 0 });
+  return { appearances: history.length, goals: total.goals, assists: total.assists, ga: total.goals + total.assists, averageRating: history.length ? total.rating / history.length : 0 };
+}
+function formLabel(id) {
+  const form = recentFormSummary(id);
+  return form.appearances ? '直近' + form.appearances + '試合 ' + form.goals + 'G ' + form.assists + 'A / 平均評価 ' + form.averageRating.toFixed(2) : '直近成績 —';
+}
 function addGoalAssists(events, poolAtMinute) {
   events.forEach(goal => {
     if (Math.random() >= .75) return;
@@ -920,9 +996,29 @@ function recordUserMatchStats(match, starters, substitutions) {
     rating = Math.max(5, Math.min(10, Math.round(rating * 10) / 10));
     const stats = playerSeasonStats(player.id);
     stats.appearances++; stats.goals += goals; stats.assists += assists; stats.ratingTotal += rating; stats.ratingCount++;
-    return { playerId: player.id, playerName: player.name, position: player.position, goals, assists, rating };
+    const entry = { playerId: player.id, playerName: player.name, position: player.position, goals, assists, rating };
+    addRecentForm(player.id, entry);
+    return entry;
   });
   match.playerRatings = ratings;
+}
+function recordCpuForm(match, clubId) {
+  const pool = pickLineup(gameState.squads[clubId]).map(id => gameState.squads[clubId].find(player => player.id === id)).filter(Boolean);
+  const goals = match.home === clubId ? match.homeGoals : match.awayGoals;
+  const scored = match.home === clubId ? match.homeScore : match.awayScore;
+  const conceded = match.home === clubId ? match.awayScore : match.homeScore;
+  addGoalAssists(goals, () => pool);
+  const ratings = pool.map(player => {
+    const playerGoals = goals.filter(goal => goal.playerId === player.id).length;
+    const assists = goals.filter(goal => goal.assistPlayerId === player.id).length;
+    let rating = 6.4 + (scored > conceded ? .45 : scored < conceded ? -.45 : 0) + playerGoals * 1.1 + assists * .5 +
+      (conceded === 0 && ['GK','RB','CB','LB'].includes(player.position) ? .3 : 0) + (Math.random() * .6 - .3);
+    rating = Math.max(5, Math.min(10, Math.round(rating * 10) / 10));
+    const entry = { playerId: player.id, playerName: player.name, position: player.position, goals: playerGoals, assists, rating };
+    addRecentForm(player.id, entry);
+    return entry;
+  });
+  match.cpuPlayerRatings ??= {}; match.cpuPlayerRatings[clubId] = ratings;
 }
 function playMatch() {
   if (gameState.seasonComplete || currentFixture().played) return;
@@ -936,7 +1032,11 @@ function playMatch() {
     const userPool = minute => userPlayersAtMinute(selected(), m.substitutions, minute);
     m.homeGoals = generateGoalEvents(m.home, m.homeScore, m.home === USER ? userPool : null);
     m.awayGoals = generateGoalEvents(m.away, m.awayScore, m.away === USER ? userPool : null);
-    if (m.home === USER || m.away === USER) recordUserMatchStats(m, selected(), m.substitutions);
+    if (m.home === USER || m.away === USER) {
+      recordUserMatchStats(m, selected(), m.substitutions);
+      recordCpuForm(m, m.home === USER ? m.away : m.home);
+    }
+    else { recordCpuForm(m, m.home); recordCpuForm(m, m.away); }
     applyResult(gameState.standings, m);
     gameState.results.push({ ...m, matchday: gameState.currentMatchday, season: gameState.season });
   });
@@ -1005,7 +1105,7 @@ function renderPlayers() {
     const on = gameState.selectedStartingXI.includes(p.id);
     const stats = gameState.seasonPlayerStats[p.id] || { appearances: 0, goals: 0, assists: 0, ratingTotal: 0, ratingCount: 0 };
     const average = stats.ratingCount ? (stats.ratingTotal / stats.ratingCount).toFixed(2) : '—';
-    return `<article class="squad-player"><button class="player-card ${on ? 'is-starting' : ''}" data-player-id="${p.id}" aria-pressed="${on}" type="button"><span class="player-number">${on ? '✓' : p.number}</span><span><span class="player-name">${escapeHTML(p.name)}</span><span class="player-meta">${p.position} · ${p.age}歳 · 疲労 ${p.fatigue}%</span></span><span class="ovr"><strong>${p.ovr}</strong><span>OVR / POT ${p.pot}</span></span></button><div class="contract-meta">今季 ${stats.appearances}試合 / ${stats.goals}G / ${stats.assists}A / 平均 ${average}</div><div class="contract-meta">${p.contractYears}年 · 週給 ${money(p.wage)} /週${p.contractYears === 1 ? ' · 今季満了' : ''}</div><div class="player-sale"><span>市場価値 <b>${money(p.marketValue)}</b></span><button class="sell-button" data-renew="${p.id}" type="button">契約更新</button><button class="sell-button" data-sell="${p.id}" type="button" ${transferWindow().open ? '' : 'disabled'}>売却</button></div></article>`;
+    return `<article class="squad-player"><button class="player-card ${on ? 'is-starting' : ''}" data-player-id="${p.id}" aria-pressed="${on}" type="button"><span class="player-number">${on ? '✓' : p.number}</span><span><span class="player-name">${escapeHTML(p.name)}</span><span class="player-meta">${p.position} · ${p.age}歳 · 疲労 ${p.fatigue}%</span></span><span class="ovr"><strong>${p.ovr}</strong><span>OVR / POT ${p.pot}</span></span></button><div class="contract-meta">今季 ${stats.appearances}試合 / ${stats.goals}G / ${stats.assists}A / 平均 ${average}</div><div class="contract-meta">${formLabel(p.id)}</div><div class="contract-meta">${p.contractYears}年 · 週給 ${money(p.wage)} /週${p.contractYears === 1 ? ' · 今季満了' : ''}</div><div class="player-sale"><span>市場価値 <b>${money(p.marketValue)}</b></span><button class="sell-button" data-renew="${p.id}" type="button">契約更新</button><button class="sell-button" data-sell="${p.id}" type="button" ${transferWindow().open ? '' : 'disabled'}>売却</button></div></article>`;
   }).join('');
 }
 function renderTactics() {
@@ -1038,7 +1138,7 @@ function renderTransfer() {
       (p.name + ' ' + p.club.name).toLowerCase().includes(ui.search.toLowerCase()))
     .sort((a,b) => ui.sort === 'price' ? a.transferFee - b.transferFee : ui.sort === 'price-desc' ? b.transferFee - a.transferFee : b.ovr - a.ovr);
   $('#transfer-count').textContent = list.length + '人 · ' + (ui.market === 'free' ? '移籍金0・給与契約が必要' : '所属クラブにも最低15人を残します');
-  $('#transfer-list').innerHTML = list.map(p => `<article class="transfer-card" data-transfer-player="${p.id}"><div class="transfer-heading"><div><h3>${escapeHTML(p.name)}</h3><p>${p.position} · ${p.age}歳 · ${escapeHTML(p.club.name)}</p></div><strong class="rating">${p.ovr}<small>OVR</small><small>POT ${p.pot}</small></strong></div><dl><div><dt>市場価値</dt><dd>${money(p.marketValue)}</dd></div><div><dt>移籍金</dt><dd>${money(p.transferFee)}</dd></div><div><dt>契約 / 現週給</dt><dd>${p.contractYears}年 / ${money(p.wage)} /週</dd></div></dl><button data-${ui.market === 'free' ? 'sign' : 'buy'}="${p.id}" class="primary-button" type="button" ${windowStatus.open ? '' : 'disabled'}>${!windowStatus.open ? '移籍期間外' : ui.market === 'free' ? '契約する' : gameState.squads[p.club.id].length <= 15 ? '所属クラブの最低人数' : gameState.clubFunds < p.transferFee ? '資金不足' : '購入 · ' + money(p.transferFee)}</button></article>`).join('') || '<p>該当する選手はいません。</p>';
+  $('#transfer-list').innerHTML = list.map(p => `<article class="transfer-card" data-transfer-player="${p.id}"><div class="transfer-heading"><div><h3>${escapeHTML(p.name)}</h3><p>${p.position} · ${p.age}歳 · ${escapeHTML(p.club.name)}</p></div><strong class="rating">${p.ovr}<small>OVR</small><small>POT ${p.pot}</small></strong></div><dl><div><dt>市場価値</dt><dd>${money(p.marketValue)}</dd></div><div><dt>直近フォーム</dt><dd>${formLabel(p.id)}</dd></div><div><dt>契約 / 現週給</dt><dd>${p.contractYears}年 / ${money(p.wage)} /週</dd></div></dl><button data-${ui.market === 'free' ? 'sign' : 'offer'}="${p.id}" class="primary-button" type="button" ${windowStatus.open ? '' : 'disabled'}>${!windowStatus.open ? '移籍期間外' : ui.market === 'free' ? '契約する' : gameState.transferRejected[negotiationKey(p.id)] ? '交渉決裂' : gameState.squads[p.club.id].length <= 15 ? '所属クラブの最低人数' : 'オファーする'}</button></article>`).join('') || '<p>該当する選手はいません。</p>';
 }
 function renderTable() {
   $('#standings-body').innerHTML = sortedStandings().map((s,i) => `<tr class="${s.clubId === USER ? 'user-row' : ''}"><td>${i+1}</td><td><strong>${escapeHTML(clubById(s.clubId).short)}</strong> ${escapeHTML(clubById(s.clubId).name)}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.goalDifference}</td><td><b>${s.points}</b></td></tr>`).join('');
@@ -1185,7 +1285,7 @@ document.addEventListener('click', e => {
   else if (d.screen) switchScreen(d.screen);
   else if (d.playerId) togglePlayer(d.playerId);
   else if (d.sell) requestSell(d.sell);
-  else if (d.buy) requestContract(d.buy, 'buy');
+  else if (d.offer) openOfferDialog(d.offer);
   else if (d.sign) requestContract(d.sign, 'sign');
   else if (d.renew) requestContract(d.renew, 'renew');
   else if (d.market) { ui.market = d.market; renderTransfer(); }
@@ -1221,6 +1321,7 @@ $('#confirm-dialog').addEventListener('cancel', () => { confirmation = null; });
 $('#confirm-accept').addEventListener('click', () => {
   const action = confirmation; confirmation = null; $('#confirm-dialog').close(); if (action) action();
 });
+$('#counter-accept').addEventListener('click', acceptCounterOffer);
 const setupForm = $('#club-setup-form');
 if (setupForm) setupForm.addEventListener('submit', e => {
   e.preventDefault();

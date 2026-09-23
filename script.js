@@ -297,6 +297,7 @@ function closeTransferWindow() {
   const enough = pickLineup(squad()).every(Boolean);
   if (!enough || squad().length < 15) return notify('移籍期間を終了するには15人以上と4-3-3を組める人数を確保してください。');
   if (status.phase === 'winter') { if (!weeklyAction()) return; recoverPlayers(); gameState.currentMatchday = LEAGUE.winterAfter + 1; }
+  gameState.transferNegotiations = {};
   gameState.transferWindowState = 'closed';
   commit(status.phase === 'summer' ? '夏の移籍期間終了。シーズンを開始します。' : '冬の移籍期間終了。第10節へ進みます。');
   switchScreen('dashboard');
@@ -473,6 +474,8 @@ function startNextSeason(random = Math.random) {
   });
   gameState.season++;
   gameState.seasonPlayerStats = {};
+  gameState.transferNegotiations = {};
+  gameState.transferRejected = {};
   gameState.playerDevelopmentHistory.push({ season: gameState.season, players: report });
   gameState.currentMatchday = 1;
   gameState.fixtures = createFixtures(gameState.season);
@@ -1002,8 +1005,7 @@ function recordUserMatchStats(match, starters, substitutions) {
   });
   match.playerRatings = ratings;
 }
-function recordCpuForm(match, clubId) {
-  const pool = pickLineup(gameState.squads[clubId]).map(id => gameState.squads[clubId].find(player => player.id === id)).filter(Boolean);
+function recordCpuForm(match, clubId, pool) {
   const goals = match.home === clubId ? match.homeGoals : match.awayGoals;
   const scored = match.home === clubId ? match.homeScore : match.awayScore;
   const conceded = match.home === clubId ? match.awayScore : match.homeScore;
@@ -1029,14 +1031,19 @@ function playMatch() {
     m.played = true;
     populateAttendance(m);
     m.substitutions = m.home === USER || m.away === USER ? createAutoSubstitutions(selected(), gameState.selectedBench.map(playerById).filter(Boolean)) : [];
+    const cpuXIs = {};
+    for (const clubId of [m.home, m.away]) {
+      if (clubId !== USER) cpuXIs[clubId] = pickLineup(gameState.squads[clubId]).map(id => gameState.squads[clubId].find(player => player.id === id)).filter(Boolean);
+    }
     const userPool = minute => userPlayersAtMinute(selected(), m.substitutions, minute);
-    m.homeGoals = generateGoalEvents(m.home, m.homeScore, m.home === USER ? userPool : null);
-    m.awayGoals = generateGoalEvents(m.away, m.awayScore, m.away === USER ? userPool : null);
+    m.homeGoals = generateGoalEvents(m.home, m.homeScore, m.home === USER ? userPool : () => cpuXIs[m.home]);
+    m.awayGoals = generateGoalEvents(m.away, m.awayScore, m.away === USER ? userPool : () => cpuXIs[m.away]);
     if (m.home === USER || m.away === USER) {
       recordUserMatchStats(m, selected(), m.substitutions);
-      recordCpuForm(m, m.home === USER ? m.away : m.home);
+      const cpuId = m.home === USER ? m.away : m.home;
+      recordCpuForm(m, cpuId, cpuXIs[cpuId]);
     }
-    else { recordCpuForm(m, m.home); recordCpuForm(m, m.away); }
+    else { recordCpuForm(m, m.home, cpuXIs[m.home]); recordCpuForm(m, m.away, cpuXIs[m.away]); }
     applyResult(gameState.standings, m);
     gameState.results.push({ ...m, matchday: gameState.currentMatchday, season: gameState.season });
   });

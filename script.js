@@ -193,6 +193,30 @@ function initialCpuPositions(size) {
   while (positions.length < size) positions.push(extras[Math.floor(Math.random() * extras.length)]);
   return positions;
 }
+function sponsorFanMultiplier(fans = gameState?.fanCount || 25000) {
+  return Math.max(.8, Math.min(2, .4 + .6 * Math.sqrt(fans / 25000)));
+}
+function createSponsorCandidates(fans) {
+  const multiplier = sponsorFanMultiplier(fans);
+  const names = ['Northstar','Apex','Crown','Vanguard','Horizon','Titan','Meridian','Albion','Nova','Sterling','Pioneer','Summit']
+    .sort(() => Math.random() - .5).slice(0, 3);
+  const plans = [
+    { type:'安定型', signingFee:3000000, weeklyPayment:250000, winBonus:0, rankBonuses:{ champion:1000000, top3:500000, top5:0 } },
+    { type:'勝利重視型', signingFee:1500000, weeklyPayment:100000, winBonus:350000, rankBonuses:{ champion:250000, top3:0, top5:0 } },
+    { type:'成績重視型', signingFee:2000000, weeklyPayment:150000, winBonus:100000, rankBonuses:{ champion:5000000, top3:2500000, top5:1000000 } }
+  ];
+  return plans.map((plan, i) => {
+    const variation = .9 + Math.random() * .2;
+    const amount = value => Math.round(value * multiplier * variation / 50000) * 50000;
+    return { id:'sponsor-' + (i + 1), name:names[i], type:plan.type, signingFee:amount(plan.signingFee), weeklyPayment:amount(plan.weeklyPayment),
+      winBonus:amount(plan.winBonus), rankBonuses:Object.fromEntries(Object.entries(plan.rankBonuses).map(([key,value]) => [key,amount(value)])) };
+  });
+}
+function sponsorSelectionRequired() { return gameState.sponsorCandidates.length === 3 && !gameState.activeSponsor; }
+function sponsorRankBonus(sponsor, rank) {
+  if (!sponsor) return 0;
+  return rank === 1 ? sponsor.rankBonuses.champion : rank <= 3 ? sponsor.rankBonuses.top3 : rank <= 5 ? sponsor.rankBonuses.top5 : 0;
+}
 function newGame(profile) {
   const squads = { [USER]: initialPlayers.map(p => makePlayer('nb-' + p[0], ...p)) };
   clubs.filter(c => c.cpu).forEach((club, ci) => {
@@ -207,7 +231,7 @@ function newGame(profile) {
     marketValueHistory: [], releaseList: [], incomingOffers: [], endOfSeasonRoster: [], retirementHistory: [],
     currentMatchday: 1, fixtures: createFixtures(), standings: emptyStandings(),
     results: [], squads, selectedStartingXI: [], selectedBench: [], lineup: Array(11).fill(null),
-    clubFunds: 100000000, fanCount: 25000, transfers: [], seasonComplete: false, seasonPlayerStats: {},
+    clubFunds: 100000000, fanCount: 25000, sponsorCandidates: [], activeSponsor: null, transfers: [], seasonComplete: false, seasonPlayerStats: {},
     recentPlayerForm: {}, transferNegotiations: {}, transferRejected: {} };
   upgradeManagement(state);
   applyClubIdentity(state);
@@ -218,6 +242,7 @@ function newGame(profile) {
     return p;
   });
   state.nextPlayerId = 101;
+  state.sponsorCandidates = createSponsorCandidates(state.fanCount);
   return state;
 }
 function validateSave(s) {
@@ -232,7 +257,7 @@ function validateSave(s) {
       !Array.isArray(s.freeAgents) || !Array.isArray(s.retirementHistory) || !Array.isArray(s.endOfSeasonRoster) ||
       !Number.isSafeInteger(s.nextPlayerId) || s.nextPlayerId < 1 ||
       !['summer','winter','closed'].includes(s.transferWindowState) || ![1,2].includes(s.transferStage) ||
-      !Array.isArray(s.marketValueHistory) || !Array.isArray(s.releaseList) || !Array.isArray(s.incomingOffers)) throw Error('Invalid season');
+      !Array.isArray(s.marketValueHistory) || !Array.isArray(s.releaseList) || !Array.isArray(s.incomingOffers) || !Array.isArray(s.sponsorCandidates)) throw Error('Invalid season');
   if (!s.seasonPlayerStats || typeof s.seasonPlayerStats !== 'object' || Array.isArray(s.seasonPlayerStats)) throw Error('Invalid player stats');
   if (!s.recentPlayerForm || typeof s.recentPlayerForm !== 'object' || Array.isArray(s.recentPlayerForm) ||
       !s.transferNegotiations || typeof s.transferNegotiations !== 'object' ||
@@ -345,6 +370,8 @@ function migrateSave(s) {
   s.releaseList ??= [];
   s.incomingOffers ??= [];
   s.fanCount ??= 25000;
+  s.sponsorCandidates ??= [];
+  s.activeSponsor ??= null;
   if (!s.transferWindowState) {
     s.transferWindowState = s.currentMatchday === 1 && !s.fixtures?.[0]?.[0]?.played ? 'summer' : 'closed';
     if ((s.currentMatchday === LEAGUE.winterAfter && s.fixtures?.[LEAGUE.winterAfter - 1]?.[0]?.played) ||
@@ -452,9 +479,19 @@ function openWinterMarket() {
   commit('市場価値を改定しました。冬の移籍市場が開幕しました。');
   switchScreen('transfer');
 }
+function chooseSponsor(id) {
+  if (gameState.activeSponsor) return notify('今シーズンのスポンサーはすでに契約済みです。');
+  const sponsor = gameState.sponsorCandidates.find(candidate => candidate.id === id);
+  if (!sponsor) return notify('スポンサー候補が見つかりません。');
+  gameState.activeSponsor = { ...sponsor, season: gameState.season };
+  recordFinance('sponsor-signing', 'スポンサー契約金: ' + sponsor.name, sponsor.signingFee);
+  commit(sponsor.name + ' とスポンサー契約を締結しました。');
+  switchScreen('dashboard');
+}
 function closeTransferWindow() {
   const status = transferWindow();
   if (!status.open) return;
+  if (sponsorSelectionRequired()) return notify('リーグ戦を始める前にスポンサーを選択してください。');
   // Do not lock the user out of recruiting a valid XI.
   const enough = pickLineup(squad()).every(Boolean);
   if (!enough || squad().length < 15) return notify('移籍期間を終了するには15人以上と4-3-3を組める人数を確保してください。');
@@ -570,8 +607,10 @@ function finishSeason(random = Math.random) {
   const rank = sorted.findIndex(s => s.clubId === USER) + 1;
   const fanChange = rank === 1 ? 3000 : rank <= 3 ? 1500 : rank <= 5 ? 500 : rank <= 8 ? -250 : -750;
   gameState.fanCount = Math.max(1000, gameState.fanCount + fanChange);
+  const sponsorBonus = sponsorRankBonus(gameState.activeSponsor, rank);
+  if (sponsorBonus) recordFinance('sponsor-rank', 'スポンサー順位ボーナス: ' + gameState.activeSponsor.name, sponsorBonus);
   gameState.seasonHistory.push({ season: gameState.season, champion: sorted[0].clubId,
-    rank, fanChange, ...userStats });
+    rank, fanChange, sponsorBonus, ...userStats });
   gameState.endOfSeasonRoster = squad().map(p => ({ ...p }));
   gameState.transferWindowState = 'closed';
   const unattached = [];
@@ -672,6 +711,8 @@ function startNextSeason(random = Math.random) {
   gameState.incomingOffers = [];
   gameState.transferStage = 1;
   gameState.marketValueReportPending = false;
+  gameState.activeSponsor = null;
+  gameState.sponsorCandidates = createSponsorCandidates(gameState.fanCount);
   gameState.playerDevelopmentHistory.push({ season: gameState.season, players: report });
   gameState.currentMatchday = 1;
   gameState.fixtures = createFixtures(gameState.season);
@@ -683,7 +724,7 @@ function startNextSeason(random = Math.random) {
   generateIncomingOffers();
   ui.activeSlot = null; ui.reportSeason = gameState.season;
   commit('シーズン ' + gameState.season + ' 開始。夏の移籍期間開始');
-  switchScreen('development');
+  switchScreen('sponsor');
 }
 function developmentRows(report, sort) {
   return [...report.players].sort((a,b) => sort === 'decline' ? a.delta - b.delta :
@@ -832,7 +873,11 @@ function settleMatchday() {
   const key=gameState.season+':'+gameState.currentMatchday;
   if(gameState.financeSettlements.includes(key)) return;
   const m=currentFixture(), gate=m.home===USER ? m.gateRevenue : 0, wage=weeklyWages(), maintenance=maintenanceCost();
+  const sponsorWeekly = gameState.activeSponsor?.weeklyPayment || 0;
+  const sponsorWin = outcome(m) === '勝利' ? gameState.activeSponsor?.winBonus || 0 : 0;
   recordFinance('gate','入場料収入',gate);
+  if (sponsorWeekly) recordFinance('sponsor-weekly', 'スポンサー固定収入: ' + gameState.activeSponsor.name, sponsorWeekly);
+  if (sponsorWin) recordFinance('sponsor-win', 'スポンサー勝利ボーナス: ' + gameState.activeSponsor.name, sponsorWin);
   recordFinance('wage','選手給与',-wage);
   recordFinance('maintenance','クラブ維持費',-maintenance);
   for(const c of clubs) {
@@ -843,7 +888,7 @@ function settleMatchday() {
     });
   }
   const fanUpdate = updateFansAfterMatch(m);
-  m.settlement={gate,wage,maintenance,net:gate-wage-maintenance,fatigue:averageFatigue(),...fanUpdate};
+  m.settlement={gate,wage,maintenance,sponsorWeekly,sponsorWin,net:gate+sponsorWeekly+sponsorWin-wage-maintenance,fatigue:averageFatigue(),...fanUpdate};
   const result=gameState.results.find(r=>r.id===m.id); if(result) result.settlement={...m.settlement};
   gameState.financeSettlements.push(key);
 }
@@ -870,7 +915,7 @@ function renderManagement() {
   if(m.played) {
     const settlement=m.settlement;
     const details='<section class="match-finance"><h3>試合収支</h3><p>観客数 '+m.attendance.toLocaleString()+' / '+m.stadiumCapacity.toLocaleString()+'人 · 収容率 '+Math.round(m.occupancy*100)+'%</p>'+
-      (settlement ? '<p>入場料 '+money(settlement.gate)+'</p><p>給与 '+money(-settlement.wage)+' / 維持費 '+money(-settlement.maintenance)+'</p><p>今節収支 '+money(settlement.net)+'</p>'+(settlement.fanChange !== undefined ? '<p>ファン '+(settlement.fanChange >= 0 ? '+' : '')+settlement.fanChange+'人 · 現在 '+settlement.fansAfter.toLocaleString()+'人</p>' : '')+'<p>試合後平均疲労 '+settlement.fatigue+'%</p>' : '<p>移行前の試合：過去の給与・維持費は遡って請求しません。</p>')+'</section>';
+      (settlement ? '<p>入場料 '+money(settlement.gate)+'</p>'+(settlement.sponsorWeekly ? '<p>スポンサー固定収入 +'+money(settlement.sponsorWeekly)+'</p>' : '')+(settlement.sponsorWin ? '<p>勝利ボーナス +'+money(settlement.sponsorWin)+'</p>' : '')+'<p>給与 '+money(-settlement.wage)+' / 維持費 '+money(-settlement.maintenance)+'</p><p>今節収支 '+money(settlement.net)+'</p>'+(settlement.fanChange !== undefined ? '<p>ファン '+(settlement.fanChange >= 0 ? '+' : '')+settlement.fanChange+'人 · 現在 '+settlement.fansAfter.toLocaleString()+'人</p>' : '')+'<p>試合後平均疲労 '+settlement.fatigue+'%</p>' : '<p>移行前の試合：過去の給与・維持費は遡って請求しません。</p>')+'</section>';
     $('#match-fulltime-card').insertAdjacentHTML('beforeend',details);
   }
   $('#weekly-actions').hidden=!m.played;
@@ -885,6 +930,9 @@ function renderManagement() {
     const rows=entries.filter(e=>e.matchday===day);
     return '<article class="season-panel"><h3>第'+day+'節</h3>'+rows.map(e=>'<p>'+escapeHTML(e.description)+' <strong>'+money(e.amount)+'</strong></p>').join('')+'<p>収支 '+money(rows.reduce((n,e)=>n+e.amount,0))+'</p></article>';
   }).join('') || '<p>取引・試合の収支はまだありません。</p>';
+  const sponsor = gameState.activeSponsor;
+  const sponsorIncome = entries.filter(e => e.type.startsWith('sponsor-')).reduce((n,e) => n + e.amount, 0);
+  $('#finance-history').insertAdjacentHTML('beforebegin', `<section class="finance-panel"><h3>スポンサー</h3>${sponsor ? `<p>${escapeHTML(sponsor.name)} · ${sponsor.type}</p><p>契約金 ${money(sponsor.signingFee)} / 毎節 ${money(sponsor.weeklyPayment)} / 勝利 ${money(sponsor.winBonus)}</p><p>順位ボーナス: ${rankBonusLabel(sponsor)}</p><p>今季スポンサー収入 <strong>${money(sponsorIncome)}</strong></p>` : '<p>今シーズンのスポンサーは未契約です。</p>'}</section>`);
   $('#pending-contracts').innerHTML=gameState.pendingContractDecisions.length ? '<h3>契約満了選手</h3><p>全選手の更新または放出を決定してください。</p>'+gameState.pendingContractDecisions.map(id=>{
     const p=playerById(id);
     return '<article class="season-panel"><h3>'+escapeHTML(p.name)+'</h3><p>'+p.age+'歳 · '+p.position+' · OVR '+p.ovr+' / POT '+p.pot+'</p><p>現在週給 '+money(p.wage)+' · 契約満了</p><button class="primary-button" data-renew="'+id+'">契約更新</button><button class="secondary-button" data-release="'+id+'">フリーで放出</button></article>';
@@ -1104,7 +1152,7 @@ function startCareerWithProfile(name, homeCity, shortName) {
   gameState = newGame(profile);
   generateIncomingOffers();
   saveGame();
-  enterApp('dashboard');
+  enterApp('sponsor');
   notify(profile.name + ' を設立しました。');
   return true;
 }
@@ -1351,6 +1399,7 @@ function renderDashboard() {
   $('#dashboard-points').textContent = stats.points;
   $('#dashboard-matchday').textContent = gameState.seasonComplete ? '終了' : gameState.currentMatchday + ' / ' + LEAGUE.matchdays;
   $('#dashboard-fans').textContent = gameState.fanCount.toLocaleString() + '人';
+  $('#dashboard-sponsor').textContent = gameState.activeSponsor ? gameState.activeSponsor.name : '未契約';
   const next = gameState.fixtures.flat().find(m => !m.played && (m.home === USER || m.away === USER));
   $('#dashboard-opponent').textContent = next ? (next.home === USER ? 'ホーム · ' : 'アウェイ · ') + clubById(next.home === USER ? next.away : next.home).name : 'シーズン終了';
   const last = gameState.results.filter(m => m.home === USER || m.away === USER).at(-1);
@@ -1423,6 +1472,16 @@ function renderMarketValues() {
     return `<article class="development-card"><h3>${escapeHTML(p.name)} <small>${p.position} · OVR <b class="${ovrClass(p.ovr)}">${p.ovr}</b></small></h3><p>${money(p.oldValue)} → <strong>${money(p.newValue)}</strong> <b class="${delta > 0 ? 'gain' : delta < 0 ? 'decline' : 'unchanged'}">${delta >= 0 ? '+' : ''}${money(delta)} · ${percent >= 0 ? '+' : ''}${percent.toFixed(1)}%</b></p></article>`;
   }).join('') : '<p>市場価値改定結果はありません。</p>';
   $('#open-winter-market').hidden = !gameState.marketValueReportPending;
+}
+function rankBonusLabel(sponsor) {
+  if (!sponsor) return '—';
+  const b = sponsor.rankBonuses;
+  return '優勝 ' + money(b.champion) + ' / TOP3 ' + money(b.top3) + ' / TOP5 ' + money(b.top5);
+}
+function renderSponsors() {
+  $('#sponsor-list').innerHTML = gameState.activeSponsor
+    ? `<article class="development-card"><h3>${escapeHTML(gameState.activeSponsor.name)}</h3><p>${gameState.activeSponsor.type} · 今シーズン契約済み</p></article>`
+    : gameState.sponsorCandidates.map(sponsor => `<article class="development-card"><h3>${escapeHTML(sponsor.name)}</h3><p>${sponsor.type}</p><p>契約金 ${money(sponsor.signingFee)} · 毎節 ${money(sponsor.weeklyPayment)}</p><p>勝利ボーナス ${money(sponsor.winBonus)} · 順位: ${rankBonusLabel(sponsor)}</p><button class="primary-button" data-sponsor="${sponsor.id}" type="button">このスポンサーと契約</button></article>`).join('') || '<p>次シーズン開始時にスポンサー候補が届きます。</p>';
 }
 function renderTable() {
   $('#standings-body').innerHTML = sortedStandings().map((s,i) => `<tr class="${s.clubId === USER ? 'user-row' : ''}"><td>${i+1}</td><td><strong>${escapeHTML(clubById(s.clubId).short)}</strong> ${escapeHTML(clubById(s.clubId).name)}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.goalDifference}</td><td><b>${s.points}</b></td></tr>`).join('');
@@ -1540,7 +1599,7 @@ function renderMatch() {
 }
 function renderAll() {
   if (!gameState) return;
-  renderDashboard(); renderPlayers(); renderTactics(); renderMatch(); renderTable(); renderTransfer(); renderSeasons(); renderManagement(); renderMarketValues();
+  renderDashboard(); renderPlayers(); renderTactics(); renderMatch(); renderTable(); renderTransfer(); renderSeasons(); renderManagement(); renderMarketValues(); renderSponsors();
 }
 function switchScreen(name) {
   if (name === 'match') name = 'dashboard';
@@ -1548,7 +1607,7 @@ function switchScreen(name) {
   if (!target) return;
   ui.screen = name;
   document.querySelectorAll('.screen').forEach(s => { s.hidden = s !== target; });
-  $('#screen-title').textContent = ({dashboard:'ホーム',squad:'選手',tactics:'戦術',table:'順位表',finance:'財政',transfer:'移籍市場',season:'シーズン結果',development:'選手成長レポート','market-values':'市場価値改定'})[name] || name;
+  $('#screen-title').textContent = ({dashboard:'ホーム',squad:'選手',tactics:'戦術',table:'順位表',finance:'財政',transfer:'移籍市場',season:'シーズン結果',development:'選手成長レポート','market-values':'市場価値改定',sponsor:'スポンサー選択'})[name] || name;
   document.querySelectorAll('[data-screen]').forEach(b => {
     b.classList.toggle('active', b.dataset.screen === name);
     if (b.dataset.screen === name) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
@@ -1569,6 +1628,7 @@ document.addEventListener('click', e => {
   else if (d.screen) switchScreen(d.screen);
   else if (d.playerId) togglePlayer(d.playerId);
   else if (d.releaseList) toggleReleaseList(d.releaseList);
+  else if (d.sponsor) chooseSponsor(d.sponsor);
   else if (d.acceptOffer) respondIncomingOffer(d.acceptOffer, true);
   else if (d.rejectOffer) respondIncomingOffer(d.rejectOffer, false);
   else if (d.offer) openOfferDialog(d.offer);

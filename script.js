@@ -229,7 +229,7 @@ function newGame(profile) {
   const state = { version: VERSION, clubProfile: normalizeClubProfile(profile) || { ...DEFAULT_CLUB_PROFILE },
     season: 1, seasonHistory: [], playerDevelopmentHistory: [],
     freeAgents: [], nextPlayerId: 1, transferWindowState: 'summer', transferStage: 1, marketValueReportPending: false,
-    marketValueHistory: [], releaseList: [], incomingOffers: [], endOfSeasonRoster: [], retirementHistory: [],
+    marketValueHistory: [], releaseList: [], incomingOffers: [], endOfSeasonRoster: [], retirementHistory: [], seasonTransitionStage: null, seasonMarketValueReport: [],
     currentMatchday: 1, fixtures: createFixtures(), standings: emptyStandings(),
     results: [], squads, selectedStartingXI: [], selectedBench: [], lineup: Array(11).fill(null),
     clubFunds: 100000000, fanCount: 25000, sponsorCandidates: [], activeSponsor: null, transfers: [], seasonComplete: false, seasonPlayerStats: {},
@@ -255,7 +255,7 @@ function validateSave(s) {
   const ids = new Set();
   if (!Number.isSafeInteger(s.season) || s.season < 1 ||
       !Array.isArray(s.seasonHistory) || !Array.isArray(s.playerDevelopmentHistory) ||
-      !Array.isArray(s.freeAgents) || !Array.isArray(s.retirementHistory) || !Array.isArray(s.endOfSeasonRoster) ||
+      !Array.isArray(s.freeAgents) || !Array.isArray(s.retirementHistory) || !Array.isArray(s.endOfSeasonRoster) || ![null,'development','market-values'].includes(s.seasonTransitionStage ?? null) || !Array.isArray(s.seasonMarketValueReport ?? []) ||
       !Number.isSafeInteger(s.nextPlayerId) || s.nextPlayerId < 1 ||
       !['summer','winter','closed'].includes(s.transferWindowState) || ![1,2].includes(s.transferStage) ||
       !Array.isArray(s.marketValueHistory) || !Array.isArray(s.releaseList) || !Array.isArray(s.incomingOffers) || !Array.isArray(s.sponsorCandidates)) throw Error('Invalid season');
@@ -359,6 +359,8 @@ function migrateSave(s) {
   s.freeAgents ??= [];
   s.retirementHistory ??= [];
   s.endOfSeasonRoster ??= [];
+  s.seasonTransitionStage ??= null;
+  s.seasonMarketValueReport ??= [];
   s.nextPlayerId ??= 1;
   s.seasonPlayerStats ??= {};
   s.recentPlayerForm ??= {};
@@ -715,6 +717,8 @@ function startNextSeason(random = Math.random) {
   if (!gameState.seasonComplete) return;
   finishSeason(random);
   if (gameState.pendingContractDecisions.length || !weeklyAction()) return notify('方針選択と契約満了選手の処理を完了してください。');
+  if (gameState.seasonTransitionStage === 'development') return switchScreen('development');
+  if (gameState.seasonTransitionStage === 'market-values') return switchScreen('season-market-values');
   const all = [...Object.values(gameState.squads).flat(), ...gameState.freeAgents];
   all.forEach(p => { evolvePlayer(p, random); p.fatigue = 0; });
   gameState.trainingBonus = 0;
@@ -724,6 +728,25 @@ function startNextSeason(random = Math.random) {
       previousOVR: old.ovr, newOVR: now ? now.ovr : old.ovr, delta: now ? now.ovr - old.ovr : 0,
       status: !now ? '引退（更新対象外）' : squad().some(p => p.id === old.id) ? '在籍' : '契約満了' };
   });
+  gameState.playerDevelopmentHistory.push({ season: gameState.season + 1, players: report });
+  gameState.seasonMarketValueReport = gameState.endOfSeasonRoster.map(old => {
+    const now = all.find(p => p.id === old.id);
+    const newValue = now ? now.marketValue : old.marketValue;
+    return { id: old.id, name: old.name, position: old.position, ovr: now ? now.ovr : old.ovr,
+      oldValue: old.marketValue, newValue, status: !now ? '引退（更新対象外）' : squad().some(p => p.id === old.id) ? '在籍' : '契約満了' };
+  });
+  gameState.seasonTransitionStage = 'development';
+  ui.reportSeason = gameState.season + 1;
+  commit('OVR更新を完了しました。');
+  switchScreen('development');
+}
+function continueSeasonTransition() {
+  if (gameState.seasonTransitionStage === 'development') {
+    gameState.seasonTransitionStage = 'market-values';
+    commit();
+    return switchScreen('season-market-values');
+  }
+  if (gameState.seasonTransitionStage !== 'market-values') return;
   gameState.season++;
   gameState.seasonPlayerStats = {};
   gameState.transferNegotiations = {};
@@ -733,12 +756,13 @@ function startNextSeason(random = Math.random) {
   gameState.marketValueReportPending = false;
   gameState.activeSponsor = null;
   gameState.sponsorCandidates = createSponsorCandidates(gameState.fanCount);
-  gameState.playerDevelopmentHistory.push({ season: gameState.season, players: report });
   gameState.currentMatchday = 1;
   gameState.fixtures = createFixtures(gameState.season);
   gameState.standings = emptyStandings(); gameState.results = [];
   gameState.seasonComplete = false; gameState.transferWindowState = 'summer';
   gameState.endOfSeasonRoster = [];
+  gameState.seasonTransitionStage = null;
+  gameState.seasonMarketValueReport = [];
   generateSeasonNewcomers();
   replenishCPU();
   generateIncomingOffers();
@@ -758,8 +782,17 @@ function renderDevelopment() {
     : '<option value="">まだレポートはありません</option>';
   if (current) $('#development-season').value = String(current.season);
   $('#development-list').innerHTML = current ? developmentRows(current, ui.developmentSort).map(p =>
-    `<article class="development-card"><div><h3>${escapeHTML(p.name)}</h3><p>${p.age}歳 · ${p.position} · ${escapeHTML(p.status)}</p></div><div class="ovr-change"><span><small>前OVR</small><b class="${ovrClass(p.previousOVR)}">${p.previousOVR}</b></span><span aria-hidden="true">→</span><span><small>新OVR</small><b class="${ovrClass(p.newOVR)}">${p.newOVR}</b></span><strong class="${p.delta > 0 ? 'gain' : p.delta < 0 ? 'decline' : 'unchanged'}">${p.delta > 0 ? '+' : ''}${p.delta}</strong></div></article>`).join('')
+    `<article class="development-card"><div><h3>${escapeHTML(p.name)}</h3><p>${p.age}歳 · ${p.position} · ${escapeHTML(p.status)}</p></div><div class="ovr-change"><span><small>前OVR</small><b class="${ovrClass(p.previousOVR)}">${p.previousOVR}</b></span><span aria-hidden="true">→</span><span><small>新OVR</small><b class="${ovrClass(p.newOVR)}">${p.newOVR}</b></span><strong class="${p.delta > 0 ? 'gain' : p.delta < 0 ? 'decline' : 'unchanged'}">${p.delta > 0 ? '+' : p.delta < 0 ? '' : '±'}${p.delta}</strong></div></article>`).join('')
     : '<p>次シーズン開始時に成長レポートが作成されます。</p>';
+  $('#development-continue').hidden = gameState.seasonTransitionStage !== 'development';
+}
+function renderSeasonMarketValues() {
+  const report = gameState.seasonMarketValueReport;
+  $('#season-market-value-list').innerHTML = report.length ? [...report].sort((a,b) => Math.abs(b.newValue - b.oldValue) - Math.abs(a.newValue - a.oldValue)).map(p => {
+    const delta = p.newValue - p.oldValue, percent = p.oldValue ? delta / p.oldValue * 100 : 0;
+    return `<article class="development-card"><div><h3>${escapeHTML(p.name)}</h3><p>${p.position} · OVR <b class="${ovrClass(p.ovr)}">${p.ovr}</b> · ${escapeHTML(p.status)}</p></div><p>${money(p.oldValue)} → <strong>${money(p.newValue)}</strong> <b class="${delta > 0 ? 'gain' : delta < 0 ? 'decline' : 'unchanged'}">${delta >= 0 ? '+' : ''}${money(delta)} / ${percent >= 0 ? '+' : ''}${percent.toFixed(1)}%</b></p></article>`;
+  }).join('') : '<p>市場価値更新データはありません。</p>';
+  $('#season-market-continue').hidden = gameState.seasonTransitionStage !== 'market-values';
 }
 function renderSeasons() {
   document.querySelectorAll('[data-window-continue]').forEach(b => {
@@ -771,6 +804,7 @@ function renderSeasons() {
     ? `<p class="eyebrow green">シーズン ${current.season} 終了</p><h2>優勝: ${escapeHTML(clubById(current.champion).name)}</h2><p>最終順位 ${current.rank}位 · 勝点 ${current.points}</p><p>勝-分-敗: ${current.wins}-${current.draws}-${current.losses}</p><p>得点 ${current.goalsFor} / 失点 ${current.goalsAgainst} / 得失点差 ${current.goalDifference}</p><p>シーズン成績によるファン ${current.fanChange >= 0 ? '+' : ''}${current.fanChange || 0}人</p><p>引退と契約年数更新を処理しました。契約満了選手は下で更新・放出を選んでください。次シーズンに年齢・OVR・市場価値を更新します。</p>`
     : '<p>シーズン ' + gameState.season + ' · シーズン進行中</p>';
   $('#start-next-season').hidden = !gameState.seasonComplete;
+  $('#start-next-season').textContent = gameState.seasonTransitionStage === 'development' ? 'OVR更新画面へ' : gameState.seasonTransitionStage === 'market-values' ? '市場価値更新画面へ' : 'OVR更新へ';
   $('#season-history').innerHTML = [...gameState.seasonHistory].reverse().map(h => `<article class="season-panel"><h3>シーズン ${h.season} · ${escapeHTML(clubById(h.champion).name)}</h3><p>優勝クラブ / 自クラブ ${h.rank}位 · ${h.points}勝点</p><p>W-D-L: ${h.wins}-${h.draws}-${h.losses}</p></article>`).join('') || '<p>シーズン終了後に記録されます。</p>';
   renderDevelopment();
 }
@@ -963,7 +997,7 @@ function renderManagement() {
     return '<article class="season-panel"><h3>'+escapeHTML(p.name)+'</h3><p>'+p.age+'歳 · '+p.position+' · OVR '+p.ovr+' / POT '+p.pot+'</p><p>現在週給 '+money(p.wage)+' · 契約満了</p><button class="primary-button" data-renew="'+id+'">契約更新</button><button class="secondary-button" data-release="'+id+'">フリーで放出</button></article>';
   }).join('') : '';
   $('#start-next-season').disabled=gameState.pendingContractDecisions.length>0 || !action;
-  $('#contract-decision-hint').textContent=gameState.seasonComplete ? gameState.pendingContractDecisions.length ? '契約満了選手の処理を完了してください。' : !action ? 'ホームで次節までの方針を選択してください。' : '次シーズンを開始できます。' : '';
+  $('#contract-decision-hint').textContent=gameState.seasonComplete ? gameState.pendingContractDecisions.length ? '契約満了選手の処理を完了してください。' : !action ? 'ホームで次節までの方針を選択してください。' : gameState.seasonTransitionStage === 'development' ? 'OVR更新は完了しています。レポートを確認してください。' : gameState.seasonTransitionStage === 'market-values' ? '市場価値更新は完了しています。レポートを確認してください。' : 'OVR更新へ進めます。' : '';
 }
 
 let saveMessage = '';
@@ -1618,7 +1652,7 @@ function renderMatch() {
 }
 function renderAll() {
   if (!gameState) return;
-  renderDashboard(); renderPlayers(); renderTactics(); renderMatch(); renderTable(); renderTransfer(); renderSeasons(); renderManagement(); renderMarketValues(); renderSponsors();
+  renderDashboard(); renderPlayers(); renderTactics(); renderMatch(); renderTable(); renderTransfer(); renderSeasons(); renderManagement(); renderMarketValues(); renderSeasonMarketValues(); renderSponsors();
 }
 function switchScreen(name) {
   if (name === 'match') name = 'dashboard';
@@ -1626,7 +1660,7 @@ function switchScreen(name) {
   if (!target) return;
   ui.screen = name;
   document.querySelectorAll('.screen').forEach(s => { s.hidden = s !== target; });
-  $('#screen-title').textContent = ({dashboard:'ホーム',squad:'選手',tactics:'戦術',table:'順位表',finance:'財政',transfer:'移籍市場',season:'シーズン結果',development:'選手成長レポート','market-values':'市場価値改定',sponsor:'スポンサー選択'})[name] || name;
+  $('#screen-title').textContent = ({dashboard:'ホーム',squad:'選手',tactics:'戦術',table:'順位表',finance:'財政',transfer:'移籍市場',season:'シーズン結果',development:'選手成長レポート','market-values':'市場価値改定','season-market-values':'市場価値更新',sponsor:'スポンサー選択'})[name] || name;
   document.querySelectorAll('[data-screen]').forEach(b => {
     b.classList.toggle('active', b.dataset.screen === name);
     if (b.dataset.screen === name) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
@@ -1678,6 +1712,8 @@ $('#offer-amount').addEventListener('input', refreshOfferAmountDisplay);
 $('#development-sort').addEventListener('change', e => { ui.developmentSort = e.target.value; renderDevelopment(); });
 $('#development-season').addEventListener('change', e => { ui.reportSeason = Number(e.target.value); renderDevelopment(); });
 $('#start-next-season').addEventListener('click', () => startNextSeason());
+$('#development-continue').addEventListener('click', continueSeasonTransition);
+$('#season-market-continue').addEventListener('click', continueSeasonTransition);
 $('#transfer-sort').addEventListener('change', e => { ui.sort = e.target.value; renderTransfer(); });
 $('#squad-sort').addEventListener('change', e => { ui.squadSort = e.target.value; renderPlayers(); });
 $('#bench-sort').addEventListener('change', e => { ui.benchSort = e.target.value; renderTactics(); });

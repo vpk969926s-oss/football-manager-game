@@ -189,7 +189,7 @@
         <section id="season-screen" class="screen" aria-labelledby="screen-title" hidden>
           <h2>シーズン結果・履歴</h2>
           <div id="season-summary" class="season-panel"></div>
-          <div id="pending-contracts"></div><p id="contract-decision-hint"></p><button id="start-next-season" class="primary-button" type="button" hidden>次シーズン開始</button>
+          <div id="pending-contracts"></div><p id="contract-decision-hint"></p><button id="start-next-season" class="primary-button" type="button" hidden>OVR更新へ</button>
           <h3 class="report-heading">シーズン履歴</h3>
           <div id="season-history" class="history-list"></div>
         </section>
@@ -203,6 +203,14 @@
             <option value="ovr">現在OVR順</option><option value="age">年齢順</option>
           </select></label>
           <div id="development-list" class="development-list"></div>
+          <button id="development-continue" class="primary-button" type="button" hidden>次へ</button>
+        </section>
+        <section id="season-market-values-screen" class="screen" aria-labelledby="screen-title" hidden>
+          <p class="eyebrow green">シーズン移行</p>
+          <h2>市場価値更新レポート</h2>
+          <p>年齢・OVR・POTの更新を反映した市場価値の変化です。</p>
+          <div id="season-market-value-list" class="development-list"></div>
+          <button id="season-market-continue" class="primary-button" type="button">次へ</button>
         </section>
         <section id="market-values-screen" class="screen" aria-labelledby="screen-title" hidden>
           <p class="eyebrow green">冬の移籍市場前</p>

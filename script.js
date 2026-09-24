@@ -403,8 +403,12 @@ function migrateSave(s) {
   s.selectedBench = s.selectedBench.filter(id => s.squads[USER]?.some(p => p.id === id) && !s.selectedStartingXI.includes(id)).slice(0, 5);
   s.releaseList = s.releaseList.filter(id => s.squads[USER]?.some(p => p.id === id));
   const hasWinterReport = s.marketValueHistory.some(entry => entry.season === s.season && entry.phase === 'winter');
-  if (s.marketValueReportPending && (s.currentMatchday !== LEAGUE.winterAfter || s.transferWindowState !== 'closed')) s.marketValueReportPending = false;
-  if (hasWinterReport && s.currentMatchday > LEAGUE.winterAfter) s.marketValueReportPending = false;
+  if (s.marketValueReportPending && s.currentMatchday === LEAGUE.winterAfter && s.fixtures?.[LEAGUE.winterAfter - 1]?.every(m => m.played)) {
+    Object.values(s.squads).flat().forEach(p => { p.fatigue = Math.max(0, p.fatigue - 7); });
+    s.currentMatchday = LEAGUE.winterAfter + 1;
+  }
+  if (s.marketValueReportPending && (s.currentMatchday !== LEAGUE.winterAfter + 1 || s.transferWindowState !== 'closed')) s.marketValueReportPending = false;
+  if (hasWinterReport && s.currentMatchday > LEAGUE.winterAfter + 1) s.marketValueReportPending = false;
   s.version = VERSION;
   return s;
 }
@@ -472,7 +476,7 @@ function generateIncomingOffers() {
   });
 }
 function openWinterMarket() {
-  if (!gameState.marketValueReportPending || gameState.currentMatchday !== LEAGUE.winterAfter) return;
+  if (!gameState.marketValueReportPending || gameState.currentMatchday !== LEAGUE.winterAfter + 1) return;
   if (!gameState.marketValueHistory.some(entry => entry.season === gameState.season && entry.phase === 'winter')) revaluePlayersForWinter();
   gameState.marketValueReportPending = false;
   gameState.transferWindowState = 'winter'; gameState.transferStage = 1;
@@ -500,9 +504,7 @@ function closeTransferWindow() {
   gameState.incomingOffers = [];
   if (finalStage) clearMarketNegotiations(status.phase);
   gameState.transferWindowState = 'closed';
-  if (status.phase === 'summer' && finalStage) { recoverPlayers(); gameState.currentMatchday = 2; }
-  if (status.phase === 'winter') { recoverPlayers(); gameState.currentMatchday = finalStage ? LEAGUE.winterAfter + 2 : LEAGUE.winterAfter + 1; }
-  commit(finalStage ? (status.phase === 'summer' ? '夏の移籍期間終了。第2節へ進みます。' : '冬の移籍期間終了。第11節へ進みます。') : (status.phase === 'summer' ? '夏の移籍期間①終了。第1節へ進みます。' : '冬の移籍期間①終了。第10節へ進みます。'));
+  commit(finalStage ? (status.phase === 'summer' ? '夏の移籍期間終了。第2節を開始できます。' : '冬の移籍期間終了。第11節を開始できます。') : (status.phase === 'summer' ? '夏の移籍期間①終了。第1節を開始できます。' : '冬の移籍期間①終了。第10節を開始できます。'));
   switchScreen('dashboard');
 }
 function requestContract(id, mode, agreedFee) {
@@ -840,18 +842,24 @@ function deriveFlow() {
 }
 function chooseWeeklyAction(action) {
   if(!currentFixture().played || weeklyAction() || !['training','rest'].includes(action)) return;
+  const completedMatchday = gameState.currentMatchday;
   squad().forEach(p=>{p.fatigue = Math.max(0,Math.min(100,p.fatigue+(action==='training' ? 5+Math.floor(Math.random()*3) : -20-Math.floor(Math.random()*6))));});
   gameState.trainingBonus = action==='training' ? 1 : 0;
-  gameState.matchdayActions.push({season:gameState.season,matchday:gameState.currentMatchday,action});
-  if (gameState.currentMatchday === 1) {
-    gameState.transferWindowState = 'summer'; gameState.transferStage = 2; generateIncomingOffers();
-  } else if (gameState.currentMatchday === LEAGUE.winterAfter && !gameState.marketValueReportPending) {
-    revaluePlayersForWinter();
-  } else if (gameState.currentMatchday === LEAGUE.winterAfter + 1) {
-    gameState.transferWindowState = 'winter'; gameState.transferStage = 2; generateIncomingOffers();
+  gameState.matchdayActions.push({season:gameState.season,matchday:completedMatchday,action});
+  if (!gameState.seasonComplete) {
+    recoverPlayers();
+    gameState.currentMatchday++;
+    if (completedMatchday === 1) {
+      gameState.transferWindowState = 'summer'; gameState.transferStage = 2; generateIncomingOffers();
+    } else if (completedMatchday === LEAGUE.winterAfter && !gameState.marketValueReportPending) {
+      revaluePlayersForWinter();
+    } else if (completedMatchday === LEAGUE.winterAfter + 1) {
+      gameState.transferWindowState = 'winter'; gameState.transferStage = 2; generateIncomingOffers();
+    }
   }
   commit(action==='training' ? 'トレーニング実施。次の試合のみチーム力 +1。' : '休養しました。');
   if (gameState.marketValueReportPending) switchScreen('market-values');
+  else switchScreen('dashboard');
 }
 function recoverPlayers() { Object.values(gameState.squads).flat().forEach(p=>{p.fatigue=Math.max(0,p.fatigue-7);}); }
 function stadiumCapacity(id,state=gameState) { return id===USER ? state.clubProfile.stadiumCapacity : 12000 + clubs.findIndex(c=>c.id===id)*2500; }
@@ -927,7 +935,6 @@ function renderManagement() {
   $('#average-fatigue').textContent='チーム平均疲労 '+averageFatigue()+'%';
   $('#match-fatigue').textContent='チーム平均疲労 '+averageFatigue()+'% · 次戦トレーニング補正 +'+gameState.trainingBonus;
   $('#match-message').textContent=transferWindow().open ? '移籍期間を終了して次のリーグ戦へ進んでください。' : !validFormation() ? '選手・戦術画面でスタメン11人を編成してください。' : '準備完了。試合を行うボタンから進めてください。';
-  $('#next-match').hidden=true;
   const m=currentFixture(), action=weeklyAction();
   document.querySelectorAll('.home-match > [data-window-continue]').forEach(b => { b.hidden=m.played || !transferWindow().open; });
   if(m.played) {
@@ -939,7 +946,7 @@ function renderManagement() {
   $('#weekly-actions').hidden=!m.played;
   $('#weekly-actions').innerHTML=m.played ? '<h3>次節までの方針</h3><p>トレーニング：疲労 +5〜7、次戦のみチーム力 +1。休養：疲労 −20〜25。</p>'+
     (action ? '<p>選択済み：'+({training:'トレーニング',rest:'休養',legacy:'旧セーブから引継ぎ'})[action.action]+'</p>' : '<div class="dialog-actions"><button class="primary-button" data-weekly="training">トレーニング</button><button class="secondary-button" data-weekly="rest">休養</button></div>')+
-    (gameState.seasonComplete ? '<button class="primary-button" data-screen="season">シーズン結果・契約判断へ</button>' : transferWindow().open ? '<p>'+transferWindow().message+'</p><button class="primary-button" data-window-continue>次のリーグ戦へ</button><button class="secondary-button" data-screen="transfer">移籍市場へ</button>' : '<button class="primary-button" id="ft-next-match" '+(!action?'disabled':'')+'>次節へ</button>') : '';
+    (gameState.seasonComplete ? '<button class="primary-button" data-screen="season">シーズン結果・契約判断へ</button>' : transferWindow().open ? '<p>'+transferWindow().message+'</p><button class="secondary-button" data-screen="transfer">移籍市場へ</button>' : '') : '';
   const entries=gameState.financeLedger.filter(e=>e.season===gameState.season);
   const sum=type=>entries.filter(e=>e.type===type).reduce((n,e)=>n+e.amount,0);
   const income=entries.filter(e=>e.amount>0).reduce((n,e)=>n+e.amount,0),expense=-entries.filter(e=>e.amount<0).reduce((n,e)=>n+e.amount,0);
@@ -1390,13 +1397,6 @@ function playMatch() {
     }
   }
 }
-function nextMatchday() {
-  if (!currentFixture().played || !weeklyAction() || gameState.currentMatchday >= LEAGUE.matchdays || transferWindow().open || gameState.marketValueReportPending) return;
-  recoverPlayers();
-  gameState.currentMatchday++;
-  commit();
-  switchScreen('dashboard');
-}
 function outcome(m) {
   const diff = m.home === USER ? m.homeScore - m.awayScore : m.awayScore - m.homeScore;
   return diff > 0 ? '勝利' : diff < 0 ? '敗戦' : '引分';
@@ -1525,8 +1525,6 @@ function renderMatch() {
   $('#match-summary').hidden = !gameState.seasonComplete;
   $('#play-match').textContent = m.played ? '試合終了' : validFormation() ? '試合を行う' : 'スタメンを編成してください';
   $('#match-message').textContent = gameState.seasonComplete ? 'シーズン終了。順位表で最終順位を確認できます。' : m.played ? 'この節は終了しました。' : '4-3-3の11人を編成して試合を開始。';
-  $('#next-match').hidden = !m.played || gameState.seasonComplete || transferWindow().open;
-
   const previewCard = $('#match-card');
   const ftCard = $('#match-fulltime-card');
 
@@ -1643,7 +1641,6 @@ document.addEventListener('click', e => {
   if (button.disabled) return;
   if (d.weekly) chooseWeeklyAction(d.weekly);
   else if (d.release) askConfirmation('フリーで放出', 'この選手をフリーで放出しますか？', () => releaseExpired(d.release));
-  else if (button.id === 'ft-next-match') nextMatchday();
   else if (d.action === 'auto-pick') autoPickBestXI();
   else if (d.action === 'clear-xi') clearStartingXI();
   else if (d.screen) switchScreen(d.screen);
@@ -1685,7 +1682,6 @@ $('#transfer-sort').addEventListener('change', e => { ui.sort = e.target.value; 
 $('#squad-sort').addEventListener('change', e => { ui.squadSort = e.target.value; renderPlayers(); });
 $('#bench-sort').addEventListener('change', e => { ui.benchSort = e.target.value; renderTactics(); });
 $('#play-match').addEventListener('click', playMatch);
-$('#next-match').addEventListener('click', nextMatchday);
 $('#reset-save').addEventListener('click', () => askConfirmation('新規ゲーム・セーブ初期化', 'リーグ進行、選手売買、編成をすべて初期化します。クラブ作成画面に戻り、資金は€100,000,000から再開します。この操作は元に戻せません。', resetGame));
 $('#confirm-cancel').addEventListener('click', () => { confirmation = null; $('#confirm-dialog').close(); });
 $('#confirm-dialog').addEventListener('cancel', () => { confirmation = null; });

@@ -73,6 +73,7 @@ ui.squadSort = 'default';
 ui.benchSort = 'default';
 function sortPlayersForDisplay(players, order) {
   const displayed = [...players];
+  if (order === 'ovr') return displayed.sort((a,b) => b.ovr - a.ovr);
   if (order !== 'position') return displayed;
   const rank = {GK:0,RB:1,RWB:1,CB:2,LB:3,LWB:3,DM:4,DMF:4,CM:5,CMF:5,AM:6,AMF:6,RW:7,LW:8,CF:9,ST:9};
   return displayed.sort((a,b) => (rank[a.position] ?? 10) - (rank[b.position] ?? 10) || b.ovr - a.ovr);
@@ -1458,7 +1459,7 @@ function renderTactics() {
   const bench = sortPlayersForDisplay(gameState.selectedBench.map(playerById).filter(Boolean), ui.benchSort);
   const reserves = sortPlayersForDisplay(squad().filter(p => !gameState.selectedStartingXI.includes(p.id) && !gameState.selectedBench.includes(p.id)), ui.benchSort);
   $('#bench-count').textContent = 'ベンチ ' + bench.length + ' / 5';
-  const card = p => `<button class="bench-player" data-bench-id="${p.id}" type="button"><span><strong>${escapeHTML(p.name)}</strong><span>${p.position} · ${p.age}歳</span></span><span class="bench-ovr ${ovrClass(p.ovr)}">${p.ovr}</span></button>`;
+  const card = p => `<button class="bench-player" data-bench-id="${p.id}" type="button"><span><strong>${escapeHTML(p.name)}</strong><span>${p.position} · ${p.age}歳 · <b class="${ovrClass(p.ovr)}">OVR ${p.ovr}</b></span></span></button>`;
   $('#registered-bench-list').innerHTML = bench.map(card).join('') || '<p>ベンチ登録選手はいません。</p>';
   $('#bench-list').innerHTML = reserves.map(card).join('') || '<p>その他の控え選手はいません。</p>';
   const counts = POSITIONS.map(pos => pos + ' ' + selected().filter(p => p.position === pos).length).join(' / ');
